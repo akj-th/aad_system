@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useProjectStore } from "@/store/project";
-import { flyTo, setContour } from "@/lib/map/controller";
+import { flyTo, setContour, setLabelsVisible } from "@/lib/map/controller";
 import type { SearchResultItem } from "@/app/api/vworld/search/route";
 
 const CONTOUR_SPACINGS = [1, 5, 10] as const;
@@ -25,6 +25,7 @@ export default function SitePanel() {
 
   const [contourOn, setContourOn] = useState(false);
   const [contourSpacing, setContourSpacing] = useState<number>(5);
+  const [labelsOn, setLabelsOn] = useState(true);
 
   async function runSearch() {
     const q = query.trim();
@@ -54,7 +55,7 @@ export default function SitePanel() {
   }
 
   return (
-    <aside className="flex h-full w-96 shrink-0 flex-col gap-5 overflow-y-auto border-r border-zinc-200 bg-white p-4 text-sm">
+    <section className="space-y-4">
       <h1 className="text-base font-bold text-zinc-900">대지</h1>
 
       {/* 주소 검색 */}
@@ -172,6 +173,23 @@ export default function SitePanel() {
         </section>
       )}
 
+      {/* 지도 명칭 */}
+      <section className="space-y-1">
+        <h2 className="font-semibold text-zinc-700">지도 명칭</h2>
+        <label className="flex items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={labelsOn}
+            onChange={(e) => {
+              setLabelsOn(e.target.checked);
+              setLabelsVisible(e.target.checked);
+            }}
+            data-testid="labels-toggle"
+          />
+          지명·건물명·POI 표시
+        </label>
+      </section>
+
       {/* 등고선 */}
       <section className="space-y-2">
         <h2 className="font-semibold text-zinc-700">등고선</h2>
@@ -202,6 +220,6 @@ export default function SitePanel() {
           </div>
         </div>
       </section>
-    </aside>
+    </section>
   );
 }

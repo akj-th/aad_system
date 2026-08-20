@@ -211,11 +211,25 @@ interface FloorArea {
   area: number
 }
 
+/** M7 뷰포트에서의 glb 모델 배치 (B-4 Phase 2) */
+interface ModelPlacement {
+  lon: number
+  lat: number
+  /** 지형 스냅 시점의 지형 고도 (타원체 기준 m) */
+  baseHeight: number
+  /** 고도 오프셋 (±50m). SketchUp 원점 보정용 */
+  heightOffset: number
+  /** 방위각 (도, 시계방향) */
+  heading: number
+  scale: number
+}
+
 interface MassingState {
   scenarios: MassScenario[]
   floorTable: FloorArea[]
   /** SketchUp 등에서 뽑은 glb 참조. M7이 이 필드를 소비한다 */
   modelRef?: string
+  placement?: ModelPlacement
 }
 
 // --- design (M5/M6) ---------------------------------------------------------
@@ -334,6 +348,7 @@ export type {
   FeasibilityState,
   MassScenario,
   FloorArea,
+  ModelPlacement,
   MassingState,
   DesignState,
   RenderCamera,

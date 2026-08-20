@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useProjectStore } from "@/store/project";
-import { drawSite, onLeftClick, pickLonLat } from "@/lib/map/controller";
+import {
+  drawSite,
+  onLeftClick,
+  pickLonLat,
+  registerMap,
+  setSun,
+  updateBuildingModel,
+} from "@/lib/map/controller";
 import type { ParcelFeature } from "@/app/api/vworld/parcel/route";
 
 // vw.Map에는 destroy가 없어 StrictMode 재마운트 시 재초기화하면 안 된다.
@@ -13,6 +20,7 @@ const MAP_CONTAINER_ID = "map";
 export default function MapViewport() {
   const [scriptMissing, setScriptMissing] = useState(false);
   const site = useProjectStore((s) => s.site);
+  const placement = useProjectStore((s) => s.massing.placement);
 
   useEffect(() => {
     if (mapStarted) return;
@@ -36,6 +44,13 @@ export default function MapViewport() {
     });
     map.setMapId(MAP_CONTAINER_ID);
     map.start();
+    registerMap(map);
+
+    // 시계를 당일 14:00으로 고정 — 안 하면 캡처(그림자 on)가 실제 시각 태양을
+    // 써서 저녁에 캡처하면 A패스가 어둡게 나온다. 패널 기본값과도 일치시킨다.
+    const noon = new Date();
+    noon.setHours(14, 0, 0, 0);
+    setSun(noon, false);
 
     if (process.env.NODE_ENV === "development") {
       // 브라우저 자동 검증용 (프로덕션 번들에는 제외됨)
@@ -78,6 +93,12 @@ export default function MapViewport() {
     if (scriptMissing) return;
     drawSite(site.parcels, site.boundary);
   }, [site, scriptMissing]);
+
+  // 건물 모델 배치 동기화
+  useEffect(() => {
+    if (scriptMissing) return;
+    updateBuildingModel(placement);
+  }, [placement, scriptMissing]);
 
   if (scriptMissing) {
     return (

@@ -1,3 +1,5 @@
+import BuildingPanel from "@/components/BuildingPanel";
+import CapturePanel from "@/components/CapturePanel";
 import MapViewport from "@/components/MapViewport";
 import SitePanel from "@/components/SitePanel";
 
@@ -24,7 +26,13 @@ export default function Home() {
       {/* eslint-disable-next-line @next/next/no-sync-scripts -- document.write 기반 로더라 동기 로드 필수 */}
       <script src={scriptSrc} />
       <div className="flex h-screen w-full overflow-hidden">
-        <SitePanel />
+        <aside className="flex h-full w-96 shrink-0 flex-col gap-6 overflow-y-auto border-r border-zinc-200 bg-white p-4 text-sm">
+          <SitePanel />
+          <hr className="border-zinc-200" />
+          <BuildingPanel />
+          <hr className="border-zinc-200" />
+          <CapturePanel />
+        </aside>
         <div className="min-w-0 flex-1">
           <MapViewport />
         </div>

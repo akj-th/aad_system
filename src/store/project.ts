@@ -1,7 +1,14 @@
 import { create } from "zustand";
 import { area as turfArea, union, featureCollection } from "@turf/turf";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
-import type { Parcel, SiteGeometry, SiteState } from "@/types/project";
+import type {
+  MassingState,
+  ModelPlacement,
+  Parcel,
+  SiteGeometry,
+  SiteState,
+} from "@/types/project";
+import type { CaptureResult } from "@/lib/map/capture";
 
 // B-0 규칙: 대지 정보는 ProjectState 형식으로만 다룬다. 지금은 site만 실사용하고
 // 나머지 필드는 이후 Phase에서 채운다.
@@ -31,12 +38,33 @@ function computeBoundary(parcels: Parcel[]): SiteGeometry | null {
   return (merged?.geometry as SiteGeometry) ?? null;
 }
 
+const emptyMassing: MassingState = {
+  scenarios: [],
+  floorTable: [],
+};
+
+/** 2패스 캡처 산출물 + 생성 시각. Phase 5에서 outputs.renders로 승격된다 */
+export interface CaptureRecord extends CaptureResult {
+  id: string;
+  createdAt: string;
+}
+
+const MAX_CAPTURES = 5; // dataURL 3장/건이라 메모리 보호를 위해 최근 것만 유지
+
 interface ProjectStore {
   site: SiteState;
+  massing: MassingState;
+  captures: CaptureRecord[];
+  addCapture(result: CaptureResult): void;
+  removeCapture(id: string): void;
   /** 이미 선택된 필지(pnu 일치)면 해제, 아니면 추가 */
   toggleParcel(parcel: Omit<Parcel, "area">): void;
   removeParcel(pnu: string): void;
   clearSite(): void;
+  /** glb 업로드 시 호출. modelRef는 파일명 (Blob URL은 세션 한정이라 저장하지 않음) */
+  setModel(modelRef: string, placement: ModelPlacement): void;
+  updatePlacement(patch: Partial<ModelPlacement>): void;
+  clearModel(): void;
 }
 
 export const useProjectStore = create<ProjectStore>((set) => {
@@ -55,6 +83,38 @@ export const useProjectStore = create<ProjectStore>((set) => {
 
   return {
     site: emptySite,
+    massing: emptyMassing,
+    captures: [],
+    addCapture: (result) =>
+      set((s) => ({
+        captures: [
+          {
+            ...result,
+            id: crypto.randomUUID(),
+            createdAt: new Date().toISOString(),
+          },
+          ...s.captures,
+        ].slice(0, MAX_CAPTURES),
+      })),
+    removeCapture: (id) =>
+      set((s) => ({ captures: s.captures.filter((c) => c.id !== id) })),
+    setModel: (modelRef, placement) =>
+      set((s) => ({ massing: { ...s.massing, modelRef, placement } })),
+    updatePlacement: (patch) =>
+      set((s) =>
+        s.massing.placement
+          ? {
+              massing: {
+                ...s.massing,
+                placement: { ...s.massing.placement, ...patch },
+              },
+            }
+          : s,
+      ),
+    clearModel: () =>
+      set((s) => ({
+        massing: { ...s.massing, modelRef: undefined, placement: undefined },
+      })),
     toggleParcel: (incoming) =>
       set((s) => {
         const exists = s.site.parcels.some((p) => p.pnu === incoming.pnu);
