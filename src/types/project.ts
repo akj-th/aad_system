@@ -12,6 +12,14 @@ interface GeoJSONPolygon {
   coordinates: Position[][]
 }
 
+interface GeoJSONMultiPolygon {
+  type: 'MultiPolygon'
+  coordinates: Position[][][]
+}
+
+/** 연속지적도 geometry는 MultiPolygon으로, 합필 결과는 비인접 필지 시 MultiPolygon으로 온다 */
+type SiteGeometry = GeoJSONPolygon | GeoJSONMultiPolygon
+
 // --- 근거 추적 --------------------------------------------------------------
 
 /** 지구단위계획 지침 PDF 등 원문 출처 (A-6) */
@@ -43,8 +51,14 @@ interface ProvenanceEntry {
 interface Parcel {
   pnu: string
   jimok: string
+  /** 도형(geometry) 기준 면적(㎡). 지적공부상 면적과 다를 수 있다 */
   area: number
-  geometry: GeoJSONPolygon
+  geometry: SiteGeometry
+  /** 연속지적도 속성 원본 */
+  jibun?: string
+  addr?: string
+  /** 개별공시지가 (원/㎡) */
+  jiga?: number
 }
 
 interface RoadFrontage {
@@ -63,7 +77,7 @@ interface SiteState {
   /** 단필 / 합필 / 임의 경계 (A-2) */
   operation: 'single' | 'merge' | 'custom'
   /** 최종 대지 경계 (합필·개발 후 결과) */
-  boundary: GeoJSONPolygon | null
+  boundary: SiteGeometry | null
   area: number
   roads: RoadFrontage[]
   slope: SlopeInfo
@@ -294,6 +308,8 @@ export interface ProjectState {
 export type {
   Position,
   GeoJSONPolygon,
+  GeoJSONMultiPolygon,
+  SiteGeometry,
   DocRef,
   ProvenanceSource,
   ProvenanceEntry,
