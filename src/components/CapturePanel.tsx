@@ -8,7 +8,8 @@ function fmt(n: number, digits = 5): string {
   return n.toFixed(digits);
 }
 
-export default function CapturePanel() {
+/** captureId를 주면 그 캡처를 고정 표시(노드 확장 뷰용), 없으면 최신 캡처 */
+export default function CapturePanel({ captureId }: { captureId?: string }) {
   const hasModel = useProjectStore((s) => !!s.massing.placement);
   const captures = useProjectStore((s) => s.captures);
   const addCapture = useProjectStore((s) => s.addCapture);
@@ -29,7 +30,9 @@ export default function CapturePanel() {
     }
   }
 
-  const latest = captures[0];
+  const latest = captureId
+    ? captures.find((c) => c.id === captureId)
+    : captures[0];
 
   return (
     <section className="space-y-3">

@@ -43,10 +43,26 @@ const emptyMassing: MassingState = {
   floorTable: [],
 };
 
+/** 한 캡처에서 생성된 AI 리터칭 결과 */
+export interface RenderRecord {
+  id: string;
+  createdAt: string;
+  image: string;
+  prompt: string;
+  options: {
+    material: string;
+    timeOfDay: string;
+    season: string;
+    extra?: string;
+    useSilhouette?: boolean;
+  };
+}
+
 /** 2패스 캡처 산출물 + 생성 시각. Phase 5에서 outputs.renders로 승격된다 */
 export interface CaptureRecord extends CaptureResult {
   id: string;
   createdAt: string;
+  renders: RenderRecord[];
 }
 
 const MAX_CAPTURES = 5; // dataURL 3장/건이라 메모리 보호를 위해 최근 것만 유지
@@ -57,6 +73,7 @@ interface ProjectStore {
   captures: CaptureRecord[];
   addCapture(result: CaptureResult): void;
   removeCapture(id: string): void;
+  addRender(captureId: string, render: Omit<RenderRecord, "id" | "createdAt">): void;
   /** 이미 선택된 필지(pnu 일치)면 해제, 아니면 추가 */
   toggleParcel(parcel: Omit<Parcel, "area">): void;
   removeParcel(pnu: string): void;
@@ -92,9 +109,28 @@ export const useProjectStore = create<ProjectStore>((set) => {
             ...result,
             id: crypto.randomUUID(),
             createdAt: new Date().toISOString(),
+            renders: [],
           },
           ...s.captures,
         ].slice(0, MAX_CAPTURES),
+      })),
+    addRender: (captureId, render) =>
+      set((s) => ({
+        captures: s.captures.map((c) =>
+          c.id === captureId
+            ? {
+                ...c,
+                renders: [
+                  {
+                    ...render,
+                    id: crypto.randomUUID(),
+                    createdAt: new Date().toISOString(),
+                  },
+                  ...c.renders,
+                ],
+              }
+            : c,
+        ),
       })),
     removeCapture: (id) =>
       set((s) => ({ captures: s.captures.filter((c) => c.id !== id) })),
