@@ -240,7 +240,24 @@ export function flyToModel() {
 // SunLight로 교체해 시각에 따라 빛이 움직이게 하고, 끄면 원래 광원으로 되돌린다.
 let vworldDefaultLight: unknown = null;
 
+// 패널이 리마운트돼도 지도의 실제 표시 상태를 되읽을 수 있도록 모듈에 보관한다
+const displayState = {
+  sun: { date: new Date(), shadows: false },
+  contour: { enabled: false, spacing: 5 },
+};
+
+export function getSunState() {
+  return { ...displayState.sun };
+}
+export function getContourState() {
+  return { ...displayState.contour };
+}
+export function getBuildingsVisible(): boolean {
+  return layerVisibility.buildings;
+}
+
 export function setSun(date: Date, shadowsEnabled: boolean) {
+  displayState.sun = { date, shadows: shadowsEnabled };
   const viewer = getViewer();
   if (!viewer) return;
   const scene = viewer.scene;
@@ -325,6 +342,7 @@ export function getLabelsVisible(): boolean {
 // --- 등고선 ------------------------------------------------------------------
 
 export function setContour(enabled: boolean, spacingMeters: number) {
+  displayState.contour = { enabled, spacing: spacingMeters };
   const viewer = getViewer();
   if (!viewer) return;
   const globe = viewer.scene.globe;

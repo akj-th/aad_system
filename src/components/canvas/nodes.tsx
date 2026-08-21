@@ -81,8 +81,18 @@ export function RegulationNode() {
 
 export function ProgramNode() {
   const program = useProjectStore((s) => s.program);
+  // 법정 최대 연면적 초과 여부 (공부면적 × 적용 용적률)
+  const maxGross = useProjectStore((s) => {
+    const base = s.site.parcels.reduce((sum, p) => sum + (p.officialArea ?? p.area), 0);
+    return (base * s.regulation.far.applied) / 100;
+  });
+  const over = maxGross > 0 && program.grossArea > maxGross + 0.5;
   return (
-    <NodeCard kind="program" title={program.uses.length ? `${program.uses.length}개 용도` : "용도 미설정"}>
+    <NodeCard
+      kind="program"
+      title={program.uses.length ? `${program.uses.length}개 용도` : "용도 미설정"}
+      badge={over ? "법정 연면적 초과" : undefined}
+    >
       {program.grossArea === 0 ? (
         <p className="text-zinc-400">법규 조회 후 더블클릭해 용도를 구성하세요</p>
       ) : (
@@ -123,7 +133,7 @@ export function FeasibilityNode() {
         <>
           <p>
             ROI <strong className={r.ROI < 0 ? "text-red-600" : ""}>{(r.ROI * 100).toFixed(1)}%</strong>{" "}
-            · IRR {(r.IRR * 100).toFixed(1)}%
+            · IRR {r.IRR === 0 && r.ROI !== 0 ? "—" : `${(r.IRR * 100).toFixed(1)}%`}
           </p>
           <p className="text-[10px] text-zinc-400">
             NPV {won(r.NPV)} (할인율 {(feasibility.assumptions.discountRate * 100).toFixed(1)}%)

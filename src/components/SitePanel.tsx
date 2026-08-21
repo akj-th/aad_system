@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 import { useProjectStore } from "@/store/project";
-import { flyTo, setContour, setLabelsVisible } from "@/lib/map/controller";
+import {
+  flyTo,
+  getContourState,
+  getLabelsVisible,
+  setContour,
+  setLabelsVisible,
+} from "@/lib/map/controller";
 import type { SearchResultItem } from "@/app/api/vworld/search/route";
 
 const CONTOUR_SPACINGS = [1, 5, 10] as const;
@@ -23,9 +29,12 @@ export default function SitePanel() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  const [contourOn, setContourOn] = useState(false);
-  const [contourSpacing, setContourSpacing] = useState<number>(5);
-  const [labelsOn, setLabelsOn] = useState(true);
+  // 초기값은 지도의 실제 상태에서 읽는다 (패널이 닫혔다 열려도 어긋나지 않게)
+  const [contourOn, setContourOn] = useState(() => getContourState().enabled);
+  const [contourSpacing, setContourSpacing] = useState<number>(
+    () => getContourState().spacing,
+  );
+  const [labelsOn, setLabelsOn] = useState(() => getLabelsVisible());
 
   async function runSearch() {
     const q = query.trim();

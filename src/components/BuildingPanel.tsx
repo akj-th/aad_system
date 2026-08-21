@@ -6,6 +6,8 @@ import { useProjectStore } from "@/store/project";
 import {
   cameraCenterLonLat,
   flyToModel,
+  getBuildingsVisible,
+  getSunState,
   hasBuildingModelUrl,
   setBuildingModelUrl,
   setBuildingsVisible,
@@ -26,13 +28,17 @@ export default function BuildingPanel() {
   const [dragOver, setDragOver] = useState(false);
   const [nudgeStep, setNudgeStep] = useState<number>(1);
 
+  // 초기값은 지도의 실제 상태에서 읽는다 (패널이 닫혔다 열려도 어긋나지 않게)
   const [sunDate, setSunDate] = useState(() => {
-    const d = new Date();
+    const d = getSunState().date;
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
-  const [sunHour, setSunHour] = useState(14);
-  const [shadowsOn, setShadowsOn] = useState(false);
-  const [buildingsOn, setBuildingsOn] = useState(true);
+  const [sunHour, setSunHour] = useState(() => {
+    const d = getSunState().date;
+    return d.getHours() + Math.round((d.getMinutes() / 60) * 4) / 4;
+  });
+  const [shadowsOn, setShadowsOn] = useState(() => getSunState().shadows);
+  const [buildingsOn, setBuildingsOn] = useState(() => getBuildingsVisible());
 
   const placement = massing.placement;
 

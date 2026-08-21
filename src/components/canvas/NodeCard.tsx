@@ -32,11 +32,14 @@ export default function NodeCard({
   kind,
   title,
   stale = false,
+  badge,
   children,
 }: {
   kind: NodeKind;
   title: string;
   stale?: boolean;
+  /** stale 외의 경고 배지 (예: "법정 초과") */
+  badge?: string;
   children: ReactNode;
 }) {
   return (
@@ -62,6 +65,14 @@ export default function NodeCard({
             data-testid="stale-badge"
           >
             이전 조건 기준
+          </span>
+        )}
+        {!stale && badge && (
+          <span
+            className="ml-auto shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
+            data-testid="warn-badge"
+          >
+            {badge}
           </span>
         )}
       </div>
