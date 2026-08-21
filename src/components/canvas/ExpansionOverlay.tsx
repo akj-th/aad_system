@@ -20,9 +20,15 @@ import RenderPanel from "@/components/RenderPanel";
 import ReportPanel from "@/components/ReportPanel";
 import SitePanel from "@/components/SitePanel";
 import ZoningPanel from "@/components/ZoningPanel";
+import dynamic from "next/dynamic";
 import { useProjectStore } from "@/store/project";
 import { useUiStore } from "@/store/ui";
 import { snapshotMapThumb } from "./mapThumb";
+import { flyTo } from "@/lib/map/controller";
+import { getCenter2D } from "@/lib/map/map2d";
+
+// Leaflet은 window가 필요하므로 클라이언트에서만 로드
+const SiteMap2D = dynamic(() => import("@/components/SiteMap2D"), { ssr: false });
 
 export default function ExpansionOverlay() {
   const expandedNode = useUiStore((s) => s.expandedNode);
@@ -39,11 +45,16 @@ export default function ExpansionOverlay() {
   }, [open, setMapLayer]);
 
   const close = useCallback(async () => {
+    // 2D 필지 지도에서 닫으면 3D 카메라를 같은 위치로 맞춘다
+    if (expandedKind === "site") {
+      const c = getCenter2D();
+      if (c) flyTo(c.lon, c.lat, 600);
+    }
     const thumb = await snapshotMapThumb();
     if (thumb) setViewportThumb(thumb);
     setMapLayer("hidden");
     setExpandedNode(null);
-  }, [setExpandedNode, setMapLayer, setViewportThumb]);
+  }, [expandedKind, setExpandedNode, setMapLayer, setViewportThumb]);
 
   useEffect(() => {
     if (!open) return;
@@ -71,6 +82,12 @@ export default function ExpansionOverlay() {
   // 아래에 깔린다 — body로 portal해서 지도 위(z-50)에 띄운다.
   return createPortal(
     <div data-testid="expansion-overlay">
+      {/* 대지 노드: 필지 선택은 2D 지도로 (3D 지도 위, 도구 카드 아래) */}
+      {expandedKind === "site" && (
+        <div className="fixed inset-0 z-[45]">
+          <SiteMap2D />
+        </div>
+      )}
       <aside
         className={`fixed inset-y-0 right-0 z-50 flex flex-col gap-6 overflow-y-auto border-l border-zinc-200 bg-white p-4 text-sm shadow-xl ${
           expandedKind === "report" || expandedKind === "drawings"

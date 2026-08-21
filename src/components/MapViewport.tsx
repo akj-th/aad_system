@@ -5,13 +5,10 @@ import { useProjectStore } from "@/store/project";
 import {
   drawMass,
   drawSite,
-  onLeftClick,
-  pickLonLat,
   registerMap,
   setSun,
   updateBuildingModel,
 } from "@/lib/map/controller";
-import type { ParcelFeature } from "@/app/api/vworld/parcel/route";
 
 // vw.Map에는 destroy가 없어 StrictMode 재마운트 시 재초기화하면 안 된다.
 let mapStarted = false;
@@ -63,34 +60,7 @@ export default function MapViewport() {
     }
   }, []);
 
-  // 지도 클릭 → 필지 조회 → 선택 토글
-  useEffect(() => {
-    if (scriptMissing) return;
-    const { toggleParcel } = useProjectStore.getState();
-
-    return onLeftClick(async (x, y) => {
-      const lonlat = pickLonLat(x, y);
-      if (!lonlat) return;
-      try {
-        const res = await fetch(
-          `/api/vworld/parcel?lon=${lonlat.lon}&lat=${lonlat.lat}`,
-        );
-        const json = (await res.json()) as { parcel: ParcelFeature | null };
-        if (json.parcel?.pnu) {
-          toggleParcel({
-            pnu: json.parcel.pnu,
-            jimok: "",
-            geometry: json.parcel.geometry,
-            jibun: json.parcel.jibun,
-            addr: json.parcel.addr,
-            jiga: json.parcel.jiga ?? undefined,
-          });
-        }
-      } catch {
-        // 필지 조회 실패는 치명적이지 않다 — 클릭 무시
-      }
-    });
-  }, [scriptMissing]);
+  // 필지 선택은 2D 지도(SiteMap2D)에서 한다 — 3D 클릭 선택은 궤도 조작과 충돌해 제거.
 
   // 선택 상태 → 지도 하이라이트 동기화
   useEffect(() => {

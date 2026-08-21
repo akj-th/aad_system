@@ -9,6 +9,7 @@ import {
   setContour,
   setLabelsVisible,
 } from "@/lib/map/controller";
+import { setView2D } from "@/lib/map/map2d";
 import type { SearchResultItem } from "@/app/api/vworld/search/route";
 
 const CONTOUR_SPACINGS = [1, 5, 10] as const;
@@ -96,6 +97,7 @@ export default function SitePanel() {
                 <button
                   className="w-full px-2 py-1.5 text-left hover:bg-blue-50"
                   onClick={() => {
+                    setView2D(r.lon, r.lat, 18);
                     flyTo(r.lon, r.lat);
                     setResults([]);
                   }}
@@ -113,7 +115,7 @@ export default function SitePanel() {
           </ul>
         )}
         <p className="text-xs text-zinc-400">
-          이동 후 지도에서 필지를 클릭해 선택하세요. 다시 클릭하면 해제됩니다.
+          이동 후 2D 지도에서 필지를 클릭해 선택하세요. 다시 클릭하면 해제됩니다. (z16 이상에서 필지 표시)
         </p>
       </section>
 
