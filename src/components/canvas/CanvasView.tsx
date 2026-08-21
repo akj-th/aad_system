@@ -23,6 +23,7 @@ import { refreshRegulation } from "@/lib/regulation/landinfo";
 import { useProjectStore, type CaptureRecord } from "@/store/project";
 import { useUiStore, type NodeKind } from "@/store/ui";
 import ExpansionOverlay from "./ExpansionOverlay";
+import CanvasToolbar from "./CanvasToolbar";
 
 const nodeTypes = {
   site: SiteNode,
@@ -161,6 +162,7 @@ export default function CanvasView() {
         <Background gap={20} color="#d4d4d8" />
         <Controls showInteractive={false} />
       </ReactFlow>
+      <CanvasToolbar />
       <ExpansionOverlay />
     </div>
   );

@@ -6,6 +6,7 @@ import { useProjectStore } from "@/store/project";
 import {
   cameraCenterLonLat,
   flyToModel,
+  hasBuildingModelUrl,
   setBuildingModelUrl,
   setBuildingsVisible,
   setSun,
@@ -37,6 +38,14 @@ export default function BuildingPanel() {
 
   function loadFile(file: File) {
     if (!/\.(glb|gltf)$/i.test(file.name)) return;
+
+    // 불러온 프로젝트처럼 배치값이 이미 있으면(파일만 없음) 배치를 유지하고 파일만 교체
+    if (placement) {
+      setBuildingModelUrl(URL.createObjectURL(file));
+      setModel(file.name, placement);
+      setTimeout(flyToModel, 600);
+      return;
+    }
 
     // 초기 위치: 대지 경계 중심 → 없으면 카메라 중심
     let lon: number, lat: number;
@@ -114,7 +123,14 @@ export default function BuildingPanel() {
         data-testid="model-dropzone"
       >
         {massing.modelRef ? (
-          <span className="font-medium text-zinc-700">{massing.modelRef}</span>
+          <span className="font-medium text-zinc-700">
+            {massing.modelRef}
+            {!hasBuildingModelUrl() && (
+              <span className="ml-1 text-[10px] font-normal text-amber-600">
+                (파일 재업로드 필요 — 배치값은 유지됨)
+              </span>
+            )}
+          </span>
         ) : (
           <>
             <span>glb 파일을 끌어다 놓거나 클릭해 선택</span>

@@ -173,6 +173,8 @@ interface ProgramState {
   unitMix?: UnitMixEntry[]
   efficiency: number
   parking: ParkingRequirement
+  /** 기준 층고(m). 개략 층수·높이 산정용 사용자 입력 */
+  floorHeight?: number
 }
 
 // --- feasibility (M3) ---------------------------------------------------------
@@ -309,6 +311,8 @@ interface ProjectMeta {
   name: string
   createdAt: string
   activeScenarioId: string | null
+  /** 상태 스키마 버전 (C-6). 불러오기 시 호환성 판단용 */
+  schemaVersion: number
 }
 
 // --- ProjectState ------------------------------------------------------------

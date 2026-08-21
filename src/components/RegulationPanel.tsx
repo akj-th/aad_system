@@ -12,7 +12,10 @@ function fmt(n: number, digits = 1): string {
 export default function RegulationPanel() {
   const site = useProjectStore((s) => s.site);
   const regulation = useProjectStore((s) => s.regulation);
-  const [floorHeight, setFloorHeight] = useState(3.0);
+  // 층고는 program(규모 입력)과 공유하는 사용자 입력값
+  const floorHeight = useProjectStore((s) => s.program.floorHeight ?? 3);
+  const updateProgram = useProjectStore((s) => s.updateProgram);
+  const setFloorHeight = (v: number) => updateProgram({ floorHeight: v });
   const [refreshing, setRefreshing] = useState(false);
 
   const hasParcels = site.parcels.length > 0;

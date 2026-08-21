@@ -172,6 +172,11 @@ export function terrainHeightAt(lon: number, lat: number): number | null {
   return typeof h === "number" ? h : null;
 }
 
+/** 현재 세션에 glb가 로드돼 있는지 (불러오기 후엔 배치값만 있고 파일은 없다) */
+export function hasBuildingModelUrl(): boolean {
+  return modelBlobUrl !== null;
+}
+
 /** glb Blob URL 등록. 배치 갱신은 updateBuildingModel이 담당 */
 export function setBuildingModelUrl(blobUrl: string | null) {
   const viewer = getViewer();
