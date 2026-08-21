@@ -19,6 +19,7 @@ export type NodeKind =
   | "zoning"
   | "plan"
   | "drawings"
+  | "media"
   | "building"
   | "viewport"
   | "capture"

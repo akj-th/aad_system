@@ -6,6 +6,8 @@ import { calcAreas, lookupZoneLimits } from "@/lib/regulation/calc";
 import { calcParking } from "@/lib/regulation/parking";
 import { checkSunlight } from "@/lib/regulation/sunlight";
 import { calcFeasibility } from "@/lib/feasibility/calc";
+import { labelForUse, summarizeByUse } from "@/lib/massing/zoning";
+import { resolveDrawings } from "@/lib/drawings/list";
 
 function esc(s: unknown): string {
   return String(s ?? "")
@@ -78,6 +80,22 @@ export function buildReportHtml(p: ExportedProject): string {
   const latestRender = p.m7Captures.flatMap((c) => c.renders.map((r) => ({ c, r })))[0];
   const latestCapture = p.m7Captures[0];
 
+  // 매스·조닝·도서 (M4/M5/M8)
+  const scenarios = p.massing.scenarios;
+  const activeSc = scenarios.find((s) => s.id === meta.activeScenarioId);
+  const floorTable = p.massing.floorTable;
+  const aboveRows = floorTable.filter((r) => r.floor > 0);
+  const belowRows = floorTable.filter((r) => r.floor < 0);
+  const drawings = activeSc
+    ? resolveDrawings({
+        floors: activeSc.floors,
+        basementFloors: belowRows.length,
+        grossArea: program.grossArea,
+        siteArea: officialArea,
+        excavationDepth: belowRows.length * activeSc.floorHeight,
+      })
+    : [];
+
   const row = (k: string, v: string, basis?: string) =>
     `<tr><th>${esc(k)}</th><td>${v}</td><td class="basis">${esc(basis ?? "")}</td></tr>`;
 
@@ -140,6 +158,18 @@ ${parking ? row("법정 주차대수", `<b>${parking.legal}대</b> (산정 ${n(p
 </table>
 ${parking ? `<table class="prov">${parking.lines.map((l) => `<tr><th>${esc(l.name)}</th><td>${n(l.area, 0)}㎡ ÷ ${l.areaPerSpace} = ${n(l.raw, 2)}대${l.caveat ? `<br><span class="warn">⚠ ${esc(l.caveat)}</span>` : ""}</td><td class="basis">${esc(l.basis)}</td></tr>`).join("")}</table>` : ""}` : `<p class="caption">규모 미설정</p>`}
 
+${scenarios.length ? `<h2>3-1. 매스 대안 비교 (규칙 기반)</h2>
+<table><tr><th>대안</th><td>바닥면적 · 건폐율</td><td>층수 · 높이</td><td>연면적</td><td class="basis">정북일조(개략)</td></tr>
+${scenarios.map((s) => `<tr${s.id === activeSc?.id ? ' style="background:#f5f3ff"' : ""}><th>${esc(s.name)}${s.id === activeSc?.id ? " ★" : ""}</th><td>${n(s.footprintArea ?? 0, 0)}㎡ · ${n(s.bcr)}%</td><td>${s.floors}층 · ${n(s.height ?? 0)}m</td><td>${n(s.grossFloorArea, 0)}㎡</td><td class="basis">${s.sunlightOk ? "통과" : "검토 필요"} (이격 ${n(s.sunlightSetback ?? 0)}m)</td></tr>`).join("")}
+</table>
+<p class="caption">대지 경계를 중심 축척한 바닥 × 법정 최대 연면적 ÷ 바닥 = 층수. 배치·형태는 설계 판단으로 확정.</p>` : ""}
+${floorTable.length ? `<h2>3-2. 층별 면적표 (${esc(activeSc?.name ?? "")})</h2>
+<table class="prov"><tr><th>층</th><td>용도</td><td>바닥면적</td></tr>
+${floorTable.map((r) => `<tr><th>${r.floor > 0 ? `${r.floor}F` : `B${-r.floor}`}</th><td>${esc(labelForUse(r.use))}</td><td>${n(r.area, 1)}㎡</td></tr>`).join("")}
+<tr><th>지상 소계 / 지하 소계</th><td colspan="2">${n(aboveRows.reduce((s, r) => s + r.area, 0), 1)}㎡ / ${n(belowRows.reduce((s, r) => s + r.area, 0), 1)}㎡</td></tr>
+</table>
+<table class="prov">${summarizeByUse(aboveRows).map((u) => `<tr><th>${esc(labelForUse(u.use))}</th><td>${u.floors}개층</td><td>${n(u.area, 1)}㎡</td></tr>`).join("")}</table>` : ""}
+
 <h2>4. 사업성 검토 (개략)</h2>
 ${feas ? `<div class="kpi">
 <div><span>총사업비</span><b>${won(feas.totalCost)}</b></div>
@@ -161,7 +191,13 @@ ${latestCapture ? `<div class="imgs">
 ${latestRender ? `<div><img src="${latestRender.r.image}" alt="AI 렌더"><p class="caption">AI 생성 — 실제 설계안과 재질·주변 환경이 다를 수 있음 · ${esc(latestRender.r.options.material)}</p></div>` : ""}
 </div>` : `<p class="caption">캡처 없음</p>`}
 
-<h2>6. 근거 목록 (provenance)</h2>
+${drawings.length ? `<h2>6. 허가도서 준비 현황 (DRAFT)</h2>
+<table class="prov"><tr><th>도서</th><td>필요</td><td class="basis">근거</td></tr>
+${drawings.map((d) => `<tr><th>${esc(d.name)}</th><td>${d.required ? "필요" : "해당 없음"}${d.auto ? " · 자동 산출" : ""}</td><td class="basis">${esc(d.basis)}${d.reason ? ` — ${esc(d.reason)}` : ""}</td></tr>`).join("")}
+</table>
+<p class="caption">면적표·주차계획표·IFC 매스는 자동 산출되며, 본 도면은 건축사가 작성·검토한다.</p>` : ""}
+
+<h2>${drawings.length ? 7 : 6}. 근거 목록 (provenance)</h2>
 <table class="prov"><tr><th>항목</th><td>값</td><td class="basis">출처 · 근거</td></tr>
 ${provenance.slice(-30).map((e) => `<tr><th>${esc(e.field)}</th><td>${esc(typeof e.value === "number" ? n(e.value) : e.value)}</td><td class="basis">${esc(e.source)} · ${esc(e.basis ?? "")}</td></tr>`).join("")}
 </table>

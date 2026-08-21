@@ -261,6 +261,23 @@ export function DrawingsNode() {
   );
 }
 
+export function MediaNode() {
+  const ready = useProjectStore(
+    useShallow((s) => ({
+      uses: s.program.uses.length > 0,
+      mass: s.massing.scenarios.length > 0,
+      cost: s.feasibility.results.totalCost > 0,
+    })),
+  );
+  const n = [ready.uses, ready.mass, ready.cost].filter(Boolean).length;
+  return (
+    <NodeCard kind="media" title="다이어그램 · 영상">
+      <p>다이어그램 {n}/3 준비 · 플라이어라운드 녹화</p>
+      <p className="text-[10px] text-zinc-400">더블클릭해 생성·다운로드</p>
+    </NodeCard>
+  );
+}
+
 export function BuildingNode() {
   const massing = useProjectStore((s) => s.massing);
   const p = massing.placement;

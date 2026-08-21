@@ -9,7 +9,7 @@ export default function ReportPanel() {
   // 상태가 바뀌면 다시 생성 — 캡처/렌더 변경도 포함되도록 전체 스냅샷을 구독한다
   const snapshotKey = useProjectStore(
     (s) =>
-      `${s.meta.name}|${s.site.parcels.length}|${s.regulation.fetchedAt}|${s.program.grossArea}|${s.program.uses.length}|${s.program.parking.legal}|${s.feasibility.results.totalCost}|${s.captures.length}|${s.captures[0]?.renders.length ?? 0}`,
+      `${s.meta.name}|${s.site.parcels.length}|${s.regulation.fetchedAt}|${s.program.grossArea}|${s.program.uses.length}|${s.program.parking.legal}|${s.feasibility.results.totalCost}|${s.captures.length}|${s.captures[0]?.renders.length ?? 0}|${s.massing.scenarios.length}|${s.meta.activeScenarioId}|${s.massing.floorTable.length}`,
   );
   // eslint-disable-next-line react-hooks/exhaustive-deps -- snapshotKey가 재생성 트리거
   const html = useMemo(() => buildReportHtml(exportProject()), [snapshotKey, exportProject]);

@@ -12,6 +12,7 @@ import CapturePanel from "@/components/CapturePanel";
 import DrawingsPanel from "@/components/DrawingsPanel";
 import FeasibilityPanel from "@/components/FeasibilityPanel";
 import MassPanel from "@/components/MassPanel";
+import MediaPanel from "@/components/MediaPanel";
 import PlanPanel from "@/components/PlanPanel";
 import ProgramPanel from "@/components/ProgramPanel";
 import RegulationPanel from "@/components/RegulationPanel";
@@ -98,6 +99,7 @@ export default function ExpansionOverlay() {
         {expandedKind === "zoning" && <ZoningPanel />}
         {expandedKind === "plan" && <PlanPanel />}
         {expandedKind === "drawings" && <DrawingsPanel />}
+        {expandedKind === "media" && <MediaPanel />}
         {expandedKind === "viewport" && (
           <>
             <SitePanel />
