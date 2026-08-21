@@ -1,0 +1,91 @@
+{
+  "id": "parking",
+  "note": "부설주차장 설치기준. 면적 기준(㎡당 1대)만 수록 — 공동주택·오피스텔은 세대 구성(주택건설기준 §27) 기반이라 여기서는 면적 근사값으로 두고 별도 확인을 요구한다. 끝수 처리: 총 대수의 소수점 이하가 0.5 이상이면 1대로 본다(시행령 별표1 비고).",
+  "rounding": {
+    "threshold": 0.5,
+    "basis": "주차장법 시행령 별표1 비고"
+  },
+  "categories": [
+    {
+      "code": "amusement",
+      "name": "위락시설",
+      "short": "위락"
+    },
+    {
+      "code": "assembly_business",
+      "name": "문화및집회·종교·판매·운수·의료·운동·업무·방송국·장례식장",
+      "short": "업무·판매·문화"
+    },
+    {
+      "code": "neighborhood_lodging",
+      "name": "제1·2종 근린생활시설, 숙박시설",
+      "short": "근생·숙박"
+    },
+    {
+      "code": "apartment",
+      "name": "공동주택·오피스텔 (면적 근사)",
+      "short": "공동주택"
+    },
+    {
+      "code": "training_factory",
+      "name": "수련시설·공장·발전시설",
+      "short": "수련·공장"
+    },
+    {
+      "code": "warehouse",
+      "name": "창고시설",
+      "short": "창고"
+    },
+    {
+      "code": "dormitory",
+      "name": "학생용 기숙사",
+      "short": "기숙사"
+    },
+    {
+      "code": "other",
+      "name": "그 밖의 건축물",
+      "short": "기타"
+    }
+  ],
+  "tables": [
+    {
+      "id": "national",
+      "name": "주차장법 시행령",
+      "shortName": "주차장법 시행령",
+      "article": "별표1",
+      "areaPerSpace": {
+        "amusement": 100,
+        "assembly_business": 150,
+        "neighborhood_lodging": 200,
+        "apartment": 85,
+        "training_factory": 350,
+        "warehouse": 400,
+        "dormitory": 400,
+        "other": 300
+      },
+      "caveats": {
+        "apartment": "주택건설기준 등에 관한 규정 §27(세대당·전용면적 구간) 적용 대상 — 전용 85㎡당 1대 근사"
+      }
+    },
+    {
+      "id": "seoul",
+      "name": "서울특별시 주차장 설치 및 관리 조례",
+      "shortName": "서울시 주차장 조례",
+      "jurisdictionPrefix": "서울특별시",
+      "article": "별표2",
+      "areaPerSpace": {
+        "amusement": 67,
+        "assembly_business": 100,
+        "neighborhood_lodging": 134,
+        "apartment": 75,
+        "training_factory": 233,
+        "warehouse": 267,
+        "dormitory": 267,
+        "other": 200
+      },
+      "caveats": {
+        "apartment": "주택건설기준 §27 서울 기준(전용 85㎡ 이하 75㎡당 1대, 초과 65㎡당 1대) 중 85㎡ 이하 구간 근사 — 세대 구성 확정 후 재산정 필요"
+      }
+    }
+  ]
+}

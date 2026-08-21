@@ -14,6 +14,8 @@ import "@xyflow/react/dist/style.css";
 import {
   BuildingNode,
   CaptureNode,
+  FeasibilityNode,
+  ProgramNode,
   RegulationNode,
   RenderNode,
   SiteNode,
@@ -28,6 +30,8 @@ import CanvasToolbar from "./CanvasToolbar";
 const nodeTypes = {
   site: SiteNode,
   regulation: RegulationNode,
+  program: ProgramNode,
+  feasibility: FeasibilityNode,
   building: BuildingNode,
   viewport: ViewportNode,
   capture: CaptureNode,
@@ -41,13 +45,18 @@ function buildGraph(captures: CaptureRecord[]): {
 } {
   const nodes: Node[] = [
     { id: "site", type: "site", position: { x: 40, y: 120 }, data: {} },
-    { id: "regulation", type: "regulation", position: { x: 360, y: 280 }, data: {} },
+    // 분석 행(법규→규모→사업성)은 위쪽(y<0)에 두어 캡처·렌더가 아래로 쌓여도 겹치지 않게 한다
+    { id: "regulation", type: "regulation", position: { x: 360, y: -200 }, data: {} },
+    { id: "program", type: "program", position: { x: 680, y: -200 }, data: {} },
+    { id: "feasibility", type: "feasibility", position: { x: 1000, y: -200 }, data: {} },
     { id: "building", type: "building", position: { x: 360, y: 120 }, data: {} },
-    { id: "viewport", type: "viewport", position: { x: 680, y: 100 }, data: {} },
+    { id: "viewport", type: "viewport", position: { x: 680, y: 80 }, data: {} },
   ];
   const edges: Edge[] = [
     { id: "e-site-building", source: "site", target: "building", animated: false },
     { id: "e-site-regulation", source: "site", target: "regulation" },
+    { id: "e-regulation-program", source: "regulation", target: "program" },
+    { id: "e-program-feasibility", source: "program", target: "feasibility" },
     { id: "e-building-viewport", source: "building", target: "viewport" },
   ];
 

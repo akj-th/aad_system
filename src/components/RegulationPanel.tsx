@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useProjectStore } from "@/store/project";
 import { calcAreas } from "@/lib/regulation/calc";
 import { officialSiteArea, refreshRegulation } from "@/lib/regulation/landinfo";
+import { checkSunlight } from "@/lib/regulation/sunlight";
 
 function fmt(n: number, digits = 1): string {
   return n.toLocaleString("ko-KR", { maximumFractionDigits: digits });
@@ -17,12 +18,18 @@ export default function RegulationPanel() {
   const updateProgram = useProjectStore((s) => s.updateProgram);
   const setFloorHeight = (v: number) => updateProgram({ floorHeight: v });
   const [refreshing, setRefreshing] = useState(false);
+  // 일조 검토용 건물 높이: 기본값은 개략 높이, 사용자가 덮어쓸 수 있다
+  const [heightOverride, setHeightOverride] = useState<number | null>(null);
 
   const hasParcels = site.parcels.length > 0;
   const { area: baseArea, allOfficial } = officialSiteArea(site.parcels);
   const ready = hasParcels && regulation.useZone && regulation.bcr.applied > 0;
   const result = ready
     ? calcAreas(baseArea, regulation.bcr.applied, regulation.far.applied, floorHeight)
+    : null;
+  const checkHeight = heightOverride ?? result?.estHeight ?? 0;
+  const sunlight = ready
+    ? checkSunlight(regulation.useZone, checkHeight, site.boundary)
     : null;
 
   async function refresh() {
@@ -178,6 +185,52 @@ export default function RegulationPanel() {
               </p>
               <p className="text-[10px] text-zinc-400">
                 일조·사선·높이제한·주차는 미반영 (다음 단계)
+              </p>
+            </div>
+          )}
+
+          {/* 정북일조 개략 */}
+          {sunlight && (
+            <div className="space-y-1 rounded bg-zinc-50 p-3 text-xs" data-testid="sunlight-result">
+              <p className="font-semibold text-zinc-700">정북일조 개략 검토</p>
+              <label className="flex items-center gap-2">
+                <span className="text-zinc-500">검토 높이</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={Number(checkHeight.toFixed(1))}
+                  onChange={(e) => setHeightOverride(Number(e.target.value) || 0)}
+                  className="w-20 rounded border border-zinc-300 px-2 py-1"
+                  data-testid="sunlight-height"
+                />
+                <span className="text-zinc-500">m</span>
+                <span className="text-[10px] text-zinc-400">
+                  {heightOverride === null ? "(개략 높이 기본값)" : "(사용자 입력)"}
+                </span>
+              </label>
+              {sunlight.applies ? (
+                <>
+                  <p>
+                    정북 인접대지경계선 필요 이격{" "}
+                    <strong data-testid="sunlight-setback">{fmt(sunlight.requiredSetback)}m</strong>
+                  </p>
+                  {sunlight.siteDepthNS !== null && (
+                    <p className="text-[10px] text-zinc-500">
+                      대지 남북 깊이 약 {fmt(sunlight.siteDepthNS, 0)}m → 이격 후 가용 깊이 약{" "}
+                      {fmt(sunlight.usableDepthNS ?? 0, 0)}m (bbox 기준 개략)
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-zinc-500">이 용도지역에는 정북일조 높이제한이 적용되지 않습니다</p>
+              )}
+              <p className="text-[10px] text-zinc-400">근거: {sunlight.basis}</p>
+              <p className="text-[10px] text-zinc-400">
+                {sunlight.abolished.map((a) => `${a.name} 미적용 — ${a.basis}`).join(" · ")}
+              </p>
+              <p className="text-[10px] text-amber-700">
+                정북 방향 판정·인접대지 현황·조례 완화는 미반영. 가로구역별 높이제한은 데이터 미연동.
               </p>
             </div>
           )}

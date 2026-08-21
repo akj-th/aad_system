@@ -12,6 +12,9 @@ export type MapLayer = "base" | "overlay" | "hidden";
 export type NodeKind =
   | "site"
   | "regulation"
+  | "program"
+  | "feasibility"
+  | "report"
   | "building"
   | "viewport"
   | "capture"

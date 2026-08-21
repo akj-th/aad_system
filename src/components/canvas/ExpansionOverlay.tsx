@@ -9,6 +9,8 @@ import { useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import BuildingPanel from "@/components/BuildingPanel";
 import CapturePanel from "@/components/CapturePanel";
+import FeasibilityPanel from "@/components/FeasibilityPanel";
+import ProgramPanel from "@/components/ProgramPanel";
 import RegulationPanel from "@/components/RegulationPanel";
 import RenderPanel from "@/components/RenderPanel";
 import SitePanel from "@/components/SitePanel";
@@ -77,6 +79,8 @@ export default function ExpansionOverlay() {
 
         {expandedKind === "site" && <SitePanel />}
         {expandedKind === "regulation" && <RegulationPanel />}
+        {expandedKind === "program" && <ProgramPanel />}
+        {expandedKind === "feasibility" && <FeasibilityPanel />}
         {expandedKind === "building" && <BuildingPanel />}
         {expandedKind === "viewport" && (
           <>

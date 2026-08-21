@@ -7,6 +7,7 @@ import type { Node, NodeProps } from "@xyflow/react";
 import NodeCard from "./NodeCard";
 import { useProjectStore } from "@/store/project";
 import { useUiStore } from "@/store/ui";
+import { PARKING_CATEGORIES } from "@/lib/regulation/parking";
 
 function formatArea(sqm: number): string {
   return `${sqm.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}㎡`;
@@ -70,6 +71,61 @@ export function RegulationNode() {
           </p>
           <p className="text-[10px] text-zinc-400">
             최대 연면적 {formatArea(maxGross)} (공부면적 기준)
+          </p>
+        </>
+      )}
+    </NodeCard>
+  );
+}
+
+export function ProgramNode() {
+  const program = useProjectStore((s) => s.program);
+  return (
+    <NodeCard kind="program" title={program.uses.length ? `${program.uses.length}개 용도` : "용도 미설정"}>
+      {program.grossArea === 0 ? (
+        <p className="text-zinc-400">법규 조회 후 더블클릭해 용도를 구성하세요</p>
+      ) : (
+        <>
+          <p>
+            연면적 {formatArea(program.grossArea)} · 주차{" "}
+            <strong>{program.parking.legal}대</strong>
+          </p>
+          <p className="truncate text-[10px] text-zinc-400">
+            {program.uses
+              .map(
+                (u) =>
+                  `${PARKING_CATEGORIES.find((c) => c.code === u.code)?.short ?? u.code} ${u.ratio}%`,
+              )
+              .join(", ") || "—"}
+          </p>
+        </>
+      )}
+    </NodeCard>
+  );
+}
+
+function won(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  return `${n < 0 ? "-" : ""}${(abs / 1e8).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}억`;
+}
+
+export function FeasibilityNode() {
+  const feasibility = useProjectStore((s) => s.feasibility);
+  const grossArea = useProjectStore((s) => s.program.grossArea);
+  const r = feasibility.results;
+  return (
+    <NodeCard kind="feasibility" title={grossArea ? `총사업비 ${won(r.totalCost)}` : "미산정"}>
+      {!grossArea ? (
+        <p className="text-zinc-400">규모 확정 후 더블클릭해 가정을 입력하세요</p>
+      ) : (
+        <>
+          <p>
+            ROI <strong className={r.ROI < 0 ? "text-red-600" : ""}>{(r.ROI * 100).toFixed(1)}%</strong>{" "}
+            · IRR {(r.IRR * 100).toFixed(1)}%
+          </p>
+          <p className="text-[10px] text-zinc-400">
+            NPV {won(r.NPV)} (할인율 {(feasibility.assumptions.discountRate * 100).toFixed(1)}%)
           </p>
         </>
       )}
