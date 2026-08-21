@@ -234,6 +234,47 @@ export function flyToModel() {
   if (entity) viewer.flyTo(entity, { duration: 1.2 });
 }
 
+// --- 매스 (규칙 기반 대안) ----------------------------------------------------
+
+export const MASS_ENTITY_ID = "aad-mass";
+
+/** 활성 매스 대안을 지형 위에 압출 폴리곤으로 표출. null이면 제거 */
+export function drawMass(footprint: SiteGeometry | null, height: number) {
+  const viewer = getViewer();
+  if (!viewer) return;
+  const existing = viewer.entities.values.filter((e: { id: string }) =>
+    String(e.id).startsWith(MASS_ENTITY_ID),
+  );
+  existing.forEach((e: unknown) => viewer.entities.remove(e));
+  if (!footprint) return;
+
+  polygonsOf(footprint).forEach((rings, j) => {
+    viewer.entities.add({
+      id: `${MASS_ENTITY_ID}-${j}`,
+      polygon: {
+        hierarchy: toHierarchy(rings),
+        height: 0,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        extrudedHeight: height,
+        extrudedHeightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+        material: Cesium.Color.fromCssColorString("#a78bfa").withAlpha(0.75),
+        outline: true,
+        outlineColor: Cesium.Color.fromCssColorString("#5b21b6"),
+        shadows: Cesium.ShadowMode.ENABLED,
+      },
+    });
+  });
+}
+
+export function flyToMass() {
+  const viewer = getViewer();
+  if (!viewer) return;
+  const entities = viewer.entities.values.filter((e: { id: string }) =>
+    String(e.id).startsWith(MASS_ENTITY_ID),
+  );
+  if (entities.length) viewer.flyTo(entities, { duration: 1.2 });
+}
+
 // --- 태양·그림자 -------------------------------------------------------------
 
 // 브이월드는 태양과 무관한 고정 광원을 쓴다 (런타임 확인). 그림자를 켜면

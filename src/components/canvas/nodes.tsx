@@ -9,6 +9,7 @@ import NodeCard from "./NodeCard";
 import { useProjectStore } from "@/store/project";
 import { useUiStore } from "@/store/ui";
 import { PARKING_CATEGORIES } from "@/lib/regulation/parking";
+import { labelForUse } from "@/lib/massing/zoning";
 
 function formatArea(sqm: number): string {
   return `${sqm.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}㎡`;
@@ -171,6 +172,73 @@ export function ReportNode() {
           .filter(Boolean)
           .join(" · ") || "더블클릭해 미리보기"}
       </p>
+    </NodeCard>
+  );
+}
+
+export function MassNode() {
+  const scenarios = useProjectStore((s) => s.massing.scenarios);
+  const activeId = useProjectStore((s) => s.meta.activeScenarioId);
+  const lastSiteChangeAt = useUiStore((s) => s.lastSiteChangeAt);
+  const active = scenarios.find((s) => s.id === activeId);
+  const newest = scenarios[0];
+  const stale = !!newest && new Date(newest.createdAt).getTime() < lastSiteChangeAt;
+  return (
+    <NodeCard
+      kind="mass"
+      title={active ? active.name : scenarios.length ? `대안 ${scenarios.length}개 (미선택)` : "대안 없음"}
+      stale={stale}
+    >
+      {!scenarios.length ? (
+        <p className="text-zinc-400">더블클릭해 규칙 기반 대안 생성</p>
+      ) : active ? (
+        <>
+          <p>
+            {active.floors}층 · {(active.height ?? 0).toFixed(0)}m · 바닥 {formatArea(active.footprintArea ?? 0)}
+          </p>
+          <p className="text-[10px] text-zinc-400">
+            연면적 {formatArea(active.grossFloorArea)} · 일조 {active.sunlightOk ? "통과(개략)" : "검토 필요"}
+          </p>
+        </>
+      ) : (
+        <p className="text-zinc-400">더블클릭해 대안을 비교·활성화</p>
+      )}
+    </NodeCard>
+  );
+}
+
+export function ZoningNode() {
+  const floorTable = useProjectStore((s) => s.massing.floorTable);
+  const activeId = useProjectStore((s) => s.meta.activeScenarioId);
+  const above = floorTable.filter((r) => r.floor > 0).length;
+  const below = floorTable.filter((r) => r.floor < 0).length;
+  return (
+    <NodeCard kind="zoning" title={floorTable.length ? `지상 ${above}층 · 지하 ${below}층` : "층별 용도 미배분"}>
+      {!activeId ? (
+        <p className="text-zinc-400">매스 대안 활성화 후 배분</p>
+      ) : !floorTable.length ? (
+        <p className="text-zinc-400">더블클릭해 자동 배분</p>
+      ) : (
+        <p className="truncate text-[10px] text-zinc-400">
+          {[...new Set(floorTable.map((r) => r.use))].map(labelForUse).join(" · ")}
+        </p>
+      )}
+    </NodeCard>
+  );
+}
+
+export function PlanNode() {
+  const floors = useProjectStore((s) => s.massing.floorTable.filter((r) => r.floor > 0).length);
+  const hasFootprint = useProjectStore(
+    (s) => !!s.massing.scenarios.find((sc) => sc.id === s.meta.activeScenarioId)?.footprint,
+  );
+  return (
+    <NodeCard kind="plan" title={floors ? `${floors}개 층 초안` : "평면 초안"}>
+      {!hasFootprint || !floors ? (
+        <p className="text-zinc-400">매스 활성화 + 조닝 배분 후 생성</p>
+      ) : (
+        <p className="text-[10px] text-zinc-400">바닥 폴리곤 파생 · 코어/그리드 · 정합 보장</p>
+      )}
     </NodeCard>
   );
 }

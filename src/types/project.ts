@@ -215,10 +215,22 @@ interface MassScenario {
   bcr: number
   far: number
   createdAt: string
+  /** 규칙 기반 생성 파라미터·결과 (M4) */
+  footprint?: SiteGeometry
+  footprintArea?: number
+  /** 최대 건축면적 대비 바닥면적 비율 (1.0 = 건폐율 꽉 채움) */
+  footprintRatio?: number
+  height?: number
+  /** 정북일조 개략 통과 여부 (bbox 기준) */
+  sunlightOk?: boolean
+  sunlightSetback?: number
+  notes?: string[]
 }
 
 interface FloorArea {
+  /** 층 번호 (지하는 음수) */
   floor: number
+  /** 용도 코드 (parking.json categories) */
   use: string
   area: number
 }

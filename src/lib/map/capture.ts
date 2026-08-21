@@ -9,6 +9,7 @@ import { getCameraPose, getViewer, type CameraPose } from "./controller";
 
 const MODEL_ENTITY_ID = "aad-building-model";
 const SITE_ENTITY_PREFIX = "aad-site-";
+const MASS_ENTITY_PREFIX = "aad-mass";
 
 export interface CaptureResult {
   camera: CameraPose;
@@ -25,11 +26,16 @@ export interface CaptureResult {
  * 돌지 않는다 — 매 프레임 requestRender로 직접 렌더를 요청해야 한다.
  */
 function captureAfterFrames(viewer: ReturnType<typeof getViewer>, frames: number): Promise<string> {
+  // 엔티티 재질을 바꾸면 폴리곤 지오메트리가 워커에서 비동기로 다시 만들어진다 —
+  // 최소 프레임 수를 채운 뒤에도 dataSourceDisplay.ready가 될 때까지(최대 120프레임) 기다린다.
+  const MAX_EXTRA_FRAMES = 120;
   return new Promise((resolve) => {
     let remaining = frames;
+    let extra = 0;
     const remove = viewer.scene.postRender.addEventListener(() => {
       remaining -= 1;
-      if (remaining > 0) {
+      const entitiesReady = viewer.dataSourceDisplay?.ready !== false;
+      if (remaining > 0 || (!entitiesReady && extra++ < MAX_EXTRA_FRAMES)) {
         viewer.scene.requestRender();
         return;
       }
@@ -44,6 +50,8 @@ interface SavedState {
   imagery: { layer: unknown; brightness: number; saturation: number }[];
   tilesetStyles: { tileset: { style: unknown }; style: unknown }[];
   hiddenEntities: { show: boolean; entity: { show: boolean } }[];
+  /** 매스 압출 폴리곤(aad-mass-*)의 원래 재질 */
+  massMaterials: { entity: { polygon: { material: unknown } }; material: unknown }[];
   modelColor: unknown;
   modelBlendMode: unknown;
   globeMaterial: unknown;
@@ -72,9 +80,12 @@ function saveState(viewer: ReturnType<typeof getViewer>): SavedState {
     }
   }
   const hiddenEntities: SavedState["hiddenEntities"] = [];
+  const massMaterials: SavedState["massMaterials"] = [];
   for (const e of viewer.entities.values) {
     if (String(e.id).startsWith(SITE_ENTITY_PREFIX)) {
       hiddenEntities.push({ entity: e, show: e.show });
+    } else if (String(e.id).startsWith(MASS_ENTITY_PREFIX)) {
+      massMaterials.push({ entity: e, material: e.polygon.material });
     }
   }
   const model = viewer.entities.getById(MODEL_ENTITY_ID);
@@ -82,6 +93,7 @@ function saveState(viewer: ReturnType<typeof getViewer>): SavedState {
     imagery,
     tilesetStyles,
     hiddenEntities,
+    massMaterials,
     modelColor: model?.model.color,
     modelBlendMode: model?.model.colorBlendMode,
     globeMaterial: scene.globe.material,
@@ -104,6 +116,7 @@ function restoreState(viewer: ReturnType<typeof getViewer>, s: SavedState) {
   }
   for (const { tileset, style } of s.tilesetStyles) tileset.style = style;
   for (const { entity, show } of s.hiddenEntities) entity.show = show;
+  for (const { entity, material } of s.massMaterials) entity.polygon.material = material;
   const model = viewer.entities.getById(MODEL_ENTITY_ID);
   if (model) {
     model.model.color = s.modelColor;
@@ -153,12 +166,21 @@ export async function capture2Pass(): Promise<CaptureResult> {
   const viewer = getViewer();
   if (!viewer) throw new Error("viewer not ready");
   const model = viewer.entities.getById(MODEL_ENTITY_ID);
-  if (!model) throw new Error("건물 모델이 없습니다");
-
   const camera = getCameraPose()!;
   const clockTime = Cesium.JulianDate.toDate(viewer.clock.currentTime).toISOString();
   const scene = viewer.scene;
   const saved = saveState(viewer);
+  if (!model && saved.massMaterials.length === 0) {
+    throw new Error("건물 모델(glb) 또는 활성 매스 대안이 없습니다");
+  }
+  // 건물 = glb 모델 + 매스 압출체. 둘 다 같은 색으로 덮는다
+  const paintBuilding = (color: unknown) => {
+    if (model) {
+      model.model.color = color;
+      model.model.colorBlendMode = Cesium.ColorBlendMode.REPLACE;
+    }
+    for (const { entity } of saved.massMaterials) entity.polygon.material = color;
+  };
 
   try {
     // 공통: 필지 하이라이트·등고선·명칭은 캡처에서 제외 (POI는 표시 옵션과 무관하게 숨김)
@@ -178,8 +200,7 @@ export async function capture2Pass(): Promise<CaptureResult> {
     }
 
     // --- A패스: 뷰티 — 건물 무광 흰색, 그림자 on, 지형 저채도 ---
-    model.model.color = Cesium.Color.WHITE;
-    model.model.colorBlendMode = Cesium.ColorBlendMode.REPLACE;
+    paintBuilding(Cesium.Color.WHITE);
     for (const { layer } of saved.imagery) {
       (layer as { saturation: number }).saturation = 0.25;
     }
@@ -194,8 +215,7 @@ export async function capture2Pass(): Promise<CaptureResult> {
     const beauty = await captureAfterFrames(viewer, 4);
 
     // --- B패스: 실루엣 — 건물 마젠타, 나머지 어둡게, 그림자·조명 변수 제거 ---
-    model.model.color = Cesium.Color.MAGENTA;
-    model.model.colorBlendMode = Cesium.ColorBlendMode.REPLACE;
+    paintBuilding(Cesium.Color.MAGENTA);
     for (const { layer } of saved.imagery) {
       const l = layer as { brightness: number; saturation: number };
       l.brightness = 0.06;

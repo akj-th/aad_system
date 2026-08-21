@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useProjectStore } from "@/store/project";
 import {
+  drawMass,
   drawSite,
   onLeftClick,
   pickLonLat,
@@ -21,6 +22,9 @@ export default function MapViewport() {
   const [scriptMissing, setScriptMissing] = useState(false);
   const site = useProjectStore((s) => s.site);
   const placement = useProjectStore((s) => s.massing.placement);
+  const activeMass = useProjectStore((s) =>
+    s.massing.scenarios.find((sc) => sc.id === s.meta.activeScenarioId),
+  );
 
   useEffect(() => {
     if (mapStarted) return;
@@ -99,6 +103,12 @@ export default function MapViewport() {
     if (scriptMissing) return;
     updateBuildingModel(placement);
   }, [placement, scriptMissing]);
+
+  // 활성 매스 대안 → 압출 폴리곤
+  useEffect(() => {
+    if (scriptMissing) return;
+    drawMass(activeMass?.footprint ?? null, activeMass?.height ?? 0);
+  }, [activeMass, scriptMissing]);
 
   if (scriptMissing) {
     return (

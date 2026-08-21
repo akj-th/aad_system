@@ -10,7 +10,10 @@ function fmt(n: number, digits = 5): string {
 
 /** captureId를 주면 그 캡처를 고정 표시(노드 확장 뷰용), 없으면 최신 캡처 */
 export default function CapturePanel({ captureId }: { captureId?: string }) {
-  const hasModel = useProjectStore((s) => !!s.massing.placement);
+  // 캡처 대상 = glb 모델 또는 활성 매스 대안
+  const hasModel = useProjectStore(
+    (s) => !!s.massing.placement || !!s.meta.activeScenarioId,
+  );
   const captures = useProjectStore((s) => s.captures);
   const addCapture = useProjectStore((s) => s.addCapture);
   const removeCapture = useProjectStore((s) => s.removeCapture);
@@ -48,7 +51,7 @@ export default function CapturePanel({ captureId }: { captureId?: string }) {
       </button>
       {!hasModel && (
         <p className="text-xs text-zinc-400">
-          건물 glb를 먼저 올려야 캡처할 수 있습니다
+          건물 glb를 올리거나 매스 대안을 활성화해야 캡처할 수 있습니다
         </p>
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}

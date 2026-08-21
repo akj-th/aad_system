@@ -10,11 +10,14 @@ import { createPortal } from "react-dom";
 import BuildingPanel from "@/components/BuildingPanel";
 import CapturePanel from "@/components/CapturePanel";
 import FeasibilityPanel from "@/components/FeasibilityPanel";
+import MassPanel from "@/components/MassPanel";
+import PlanPanel from "@/components/PlanPanel";
 import ProgramPanel from "@/components/ProgramPanel";
 import RegulationPanel from "@/components/RegulationPanel";
 import RenderPanel from "@/components/RenderPanel";
 import ReportPanel from "@/components/ReportPanel";
 import SitePanel from "@/components/SitePanel";
+import ZoningPanel from "@/components/ZoningPanel";
 import { useProjectStore } from "@/store/project";
 import { useUiStore } from "@/store/ui";
 import { snapshotMapThumb } from "./mapThumb";
@@ -88,6 +91,9 @@ export default function ExpansionOverlay() {
         {expandedKind === "feasibility" && <FeasibilityPanel />}
         {expandedKind === "report" && <ReportPanel />}
         {expandedKind === "building" && <BuildingPanel />}
+        {expandedKind === "mass" && <MassPanel />}
+        {expandedKind === "zoning" && <ZoningPanel />}
+        {expandedKind === "plan" && <PlanPanel />}
         {expandedKind === "viewport" && (
           <>
             <SitePanel />

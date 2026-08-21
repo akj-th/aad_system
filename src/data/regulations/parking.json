@@ -9,42 +9,50 @@
     {
       "code": "amusement",
       "name": "위락시설",
-      "short": "위락"
+      "short": "위락",
+      "stackOrder": 2
     },
     {
       "code": "assembly_business",
       "name": "문화및집회·종교·판매·운수·의료·운동·업무·방송국·장례식장",
-      "short": "업무·판매·문화"
+      "short": "업무·판매·문화",
+      "stackOrder": 3
     },
     {
       "code": "neighborhood_lodging",
       "name": "제1·2종 근린생활시설, 숙박시설",
-      "short": "근생·숙박"
+      "short": "근생·숙박",
+      "stackOrder": 1
     },
     {
       "code": "apartment",
       "name": "공동주택·오피스텔 (면적 근사)",
-      "short": "공동주택"
+      "short": "공동주택",
+      "stackOrder": 8
     },
     {
       "code": "training_factory",
       "name": "수련시설·공장·발전시설",
-      "short": "수련·공장"
+      "short": "수련·공장",
+      "stackOrder": 5
     },
     {
       "code": "warehouse",
       "name": "창고시설",
-      "short": "창고"
+      "short": "창고",
+      "stackOrder": 6
     },
     {
       "code": "dormitory",
       "name": "학생용 기숙사",
-      "short": "기숙사"
+      "short": "기숙사",
+      "stackOrder": 7
     },
     {
       "code": "other",
       "name": "그 밖의 건축물",
-      "short": "기타"
+      "short": "기타",
+      "stackOrder": 4
     }
   ],
   "tables": [
@@ -87,5 +95,9 @@
         "apartment": "주택건설기준 §27 서울 기준(전용 85㎡ 이하 75㎡당 1대, 초과 65㎡당 1대) 중 85㎡ 이하 구간 근사 — 세대 구성 확정 후 재산정 필요"
       }
     }
-  ]
+  ],
+  "basement": {
+    "areaPerSpaceWithAisle": 30,
+    "basis": "실무 관행 (주차구획+차로 포함 30~35㎡/대)"
+  }
 }

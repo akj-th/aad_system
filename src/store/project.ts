@@ -3,7 +3,9 @@ import { area as turfArea, union, featureCollection } from "@turf/turf";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
 import type {
   FeasibilityState,
+  FloorArea,
   MassingState,
+  MassScenario,
   ModelPlacement,
   Parcel,
   ProgramState,
@@ -156,6 +158,12 @@ interface ProjectStore {
   updatePlacement(patch: Partial<ModelPlacement>): void;
   clearModel(): void;
 
+  /** 매스 대안 (A-4 시나리오). 활성화하면 program.grossArea를 대안 연면적으로 맞춘다 */
+  setScenarios(scenarios: MassScenario[]): void;
+  updateScenario(id: string, patch: Partial<MassScenario>): void;
+  setActiveScenario(id: string | null): void;
+  setFloorTable(table: FloorArea[]): void;
+
   exportProject(): ExportedProject;
   /** 불러오기. 스키마 버전이 다르면 false 반환 */
   importProject(data: unknown): boolean;
@@ -258,6 +266,30 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set((s) => ({
         massing: { ...s.massing, modelRef: undefined, placement: undefined },
       })),
+
+    setScenarios: (scenarios) =>
+      set((s) => ({
+        massing: { ...s.massing, scenarios, floorTable: [] },
+        meta: { ...s.meta, activeScenarioId: null },
+      })),
+    updateScenario: (id, patch) =>
+      set((s) => ({
+        massing: {
+          ...s.massing,
+          scenarios: s.massing.scenarios.map((sc) => (sc.id === id ? { ...sc, ...patch } : sc)),
+        },
+      })),
+    setActiveScenario: (id) =>
+      set((s) => {
+        const sc = s.massing.scenarios.find((x) => x.id === id);
+        return {
+          meta: { ...s.meta, activeScenarioId: id },
+          program: sc ? { ...s.program, grossArea: Math.round(sc.grossFloorArea) } : s.program,
+          massing: { ...s.massing, floorTable: [] },
+        };
+      }),
+    setFloorTable: (floorTable) =>
+      set((s) => ({ massing: { ...s.massing, floorTable } })),
 
     toggleParcel: (incoming) =>
       set((s) => {
