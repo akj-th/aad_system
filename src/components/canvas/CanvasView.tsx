@@ -14,16 +14,19 @@ import "@xyflow/react/dist/style.css";
 import {
   BuildingNode,
   CaptureNode,
+  RegulationNode,
   RenderNode,
   SiteNode,
   ViewportNode,
 } from "./nodes";
+import { refreshRegulation } from "@/lib/regulation/landinfo";
 import { useProjectStore, type CaptureRecord } from "@/store/project";
 import { useUiStore, type NodeKind } from "@/store/ui";
 import ExpansionOverlay from "./ExpansionOverlay";
 
 const nodeTypes = {
   site: SiteNode,
+  regulation: RegulationNode,
   building: BuildingNode,
   viewport: ViewportNode,
   capture: CaptureNode,
@@ -37,11 +40,13 @@ function buildGraph(captures: CaptureRecord[]): {
 } {
   const nodes: Node[] = [
     { id: "site", type: "site", position: { x: 40, y: 120 }, data: {} },
+    { id: "regulation", type: "regulation", position: { x: 360, y: 280 }, data: {} },
     { id: "building", type: "building", position: { x: 360, y: 120 }, data: {} },
     { id: "viewport", type: "viewport", position: { x: 680, y: 100 }, data: {} },
   ];
   const edges: Edge[] = [
     { id: "e-site-building", source: "site", target: "building", animated: false },
+    { id: "e-site-regulation", source: "site", target: "regulation" },
     { id: "e-building-viewport", source: "building", target: "viewport" },
   ];
 
@@ -101,20 +106,37 @@ export default function CanvasView() {
     setEdges(graph.edges);
   }, [graph, setNodes, setEdges]);
 
-  // 상류(대지·건물 배치) 변경 추적 → 하류 노드 stale 판정 근거
+  // 상류 변경 추적 → 하류 노드 stale 판정 근거.
+  // site는 boundary 참조로 비교한다 — mergeParcelLandInfo(토지정보 병합)는
+  // boundary를 유지하므로 필지 구성이 실제로 바뀔 때만 감지된다.
   useEffect(
     () =>
       useProjectStore.subscribe((state, prev) => {
-        if (
-          state.site !== prev.site ||
+        const siteChanged = state.site.boundary !== prev.site.boundary;
+        const modelChanged =
           state.massing.modelRef !== prev.massing.modelRef ||
-          state.massing.placement !== prev.massing.placement
-        ) {
+          state.massing.placement !== prev.massing.placement;
+        if (siteChanged) useUiStore.getState().markSiteChange();
+        if (siteChanged || modelChanged)
           useUiStore.getState().markUpstreamChange();
-        }
       }),
     [],
   );
+
+  // 대지(필지 구성) 변경 시 토지이용계획·토지특성 자동 조회 (B-4 지시 1·2)
+  const pnuKey = useProjectStore((s) =>
+    s.site.parcels
+      .map((p) => p.pnu)
+      .sort()
+      .join(","),
+  );
+  useEffect(() => {
+    if (!pnuKey) return;
+    const t = setTimeout(() => {
+      void refreshRegulation(useProjectStore.getState().site.parcels);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [pnuKey]);
 
   const setExpandedNode = useUiStore((s) => s.setExpandedNode);
 

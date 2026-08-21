@@ -5,6 +5,8 @@ import type {
   MassingState,
   ModelPlacement,
   Parcel,
+  ProvenanceEntry,
+  RegulationState,
   SiteGeometry,
   SiteState,
 } from "@/types/project";
@@ -43,6 +45,16 @@ const emptyMassing: MassingState = {
   floorTable: [],
 };
 
+const emptyRegulation: RegulationState = {
+  useZone: "",
+  useDistrict: [],
+  dpUnitPlan: { applies: false, documentRefs: [], conditions: [] },
+  bcr: { legal: 0, applied: 0 },
+  far: { legal: 0, incentives: [], applied: 0 },
+  heightLimit: { type: "", value: 0, basis: "" },
+  setbacks: [],
+};
+
 /** 한 캡처에서 생성된 AI 리터칭 결과 */
 export interface RenderRecord {
   id: string;
@@ -70,10 +82,16 @@ const MAX_CAPTURES = 5; // dataURL 3장/건이라 메모리 보호를 위해 최
 interface ProjectStore {
   site: SiteState;
   massing: MassingState;
+  regulation: RegulationState;
+  provenance: ProvenanceEntry[];
   captures: CaptureRecord[];
   addCapture(result: CaptureResult): void;
   removeCapture(id: string): void;
   addRender(captureId: string, render: Omit<RenderRecord, "id" | "createdAt">): void;
+  /** 법규 자동 조회 결과 반영. provenance 기록 포함 */
+  setRegulation(patch: Partial<RegulationState>, provenance: ProvenanceEntry[]): void;
+  /** 토지특성 조회로 얻은 필지별 공부면적·용도지역 병합 */
+  mergeParcelLandInfo(byPnu: Record<string, { officialArea?: number; useZone?: string }>): void;
   /** 이미 선택된 필지(pnu 일치)면 해제, 아니면 추가 */
   toggleParcel(parcel: Omit<Parcel, "area">): void;
   removeParcel(pnu: string): void;
@@ -101,7 +119,23 @@ export const useProjectStore = create<ProjectStore>((set) => {
   return {
     site: emptySite,
     massing: emptyMassing,
+    regulation: emptyRegulation,
+    provenance: [],
     captures: [],
+    setRegulation: (patch, provenance) =>
+      set((s) => ({
+        regulation: { ...s.regulation, ...patch },
+        provenance: [...s.provenance, ...provenance],
+      })),
+    mergeParcelLandInfo: (byPnu) =>
+      set((s) => ({
+        site: {
+          ...s.site,
+          parcels: s.site.parcels.map((p) =>
+            byPnu[p.pnu] ? { ...p, ...byPnu[p.pnu] } : p,
+          ),
+        },
+      })),
     addCapture: (result) =>
       set((s) => ({
         captures: [

@@ -6,6 +6,7 @@ import type { NodeKind } from "@/store/ui";
 
 const KIND_LABEL: Record<NodeKind, string> = {
   site: "대지",
+  regulation: "법규",
   building: "건물",
   viewport: "3D 뷰",
   capture: "캡처",
@@ -14,6 +15,7 @@ const KIND_LABEL: Record<NodeKind, string> = {
 
 const KIND_COLOR: Record<NodeKind, string> = {
   site: "bg-blue-600",
+  regulation: "bg-rose-600",
   building: "bg-violet-600",
   viewport: "bg-zinc-700",
   capture: "bg-amber-600",

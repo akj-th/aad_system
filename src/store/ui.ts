@@ -9,7 +9,13 @@ import { create } from "zustand";
  */
 export type MapLayer = "base" | "overlay" | "hidden";
 
-export type NodeKind = "site" | "building" | "viewport" | "capture" | "render";
+export type NodeKind =
+  | "site"
+  | "regulation"
+  | "building"
+  | "viewport"
+  | "capture"
+  | "render";
 
 interface UiStore {
   mapLayer: MapLayer;
@@ -24,10 +30,12 @@ interface UiStore {
   viewportThumb: string | null;
   setViewportThumb(dataUrl: string | null): void;
 
-  // stale 판정용: 상류(대지·건물배치)가 마지막으로 바뀐 시각 (epoch ms).
-  // ProjectState를 수정하지 않기 위해 UI에서 구독으로 추적한다.
+  // stale 판정용 변경 시각 (epoch ms). UI에서 구독으로 추적한다.
+  // capture/render는 대지+건물 어느 쪽이 바뀌어도 stale, regulation은 대지만 본다.
   lastUpstreamChangeAt: number;
   markUpstreamChange(): void;
+  lastSiteChangeAt: number;
+  markSiteChange(): void;
 }
 
 export const useUiStore = create<UiStore>((set) => ({
@@ -44,4 +52,6 @@ export const useUiStore = create<UiStore>((set) => ({
 
   lastUpstreamChangeAt: 0,
   markUpstreamChange: () => set({ lastUpstreamChangeAt: Date.now() }),
+  lastSiteChangeAt: 0,
+  markSiteChange: () => set({ lastSiteChangeAt: Date.now() }),
 }));

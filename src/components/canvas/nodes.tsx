@@ -41,6 +41,42 @@ export function SiteNode() {
   );
 }
 
+export function RegulationNode() {
+  const regulation = useProjectStore((s) => s.regulation);
+  const site = useProjectStore((s) => s.site);
+  const lastSiteChangeAt = useUiStore((s) => s.lastSiteChangeAt);
+  const stale =
+    !!regulation.fetchedAt &&
+    new Date(regulation.fetchedAt).getTime() < lastSiteChangeAt;
+
+  const baseArea = site.parcels.reduce(
+    (sum, p) => sum + (p.officialArea ?? p.area),
+    0,
+  );
+  const maxGross = (baseArea * regulation.far.applied) / 100;
+
+  return (
+    <NodeCard
+      kind="regulation"
+      title={regulation.useZone || "용도지역 미조회"}
+      stale={stale}
+    >
+      {!regulation.useZone ? (
+        <p className="text-zinc-400">필지를 선택하면 자동 조회됩니다</p>
+      ) : (
+        <>
+          <p>
+            건폐율 {regulation.bcr.applied}% · 용적률 {regulation.far.applied}%
+          </p>
+          <p className="text-[10px] text-zinc-400">
+            최대 연면적 {formatArea(maxGross)} (공부면적 기준)
+          </p>
+        </>
+      )}
+    </NodeCard>
+  );
+}
+
 export function BuildingNode() {
   const massing = useProjectStore((s) => s.massing);
   const p = massing.placement;

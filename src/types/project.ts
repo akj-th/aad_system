@@ -59,6 +59,10 @@ interface Parcel {
   addr?: string
   /** 개별공시지가 (원/㎡) */
   jiga?: number
+  /** 지적공부 면적(㎡, 토지특성 API). 법규 계산 기준값 */
+  officialArea?: number
+  /** 필지별 용도지역 (토지특성 API) */
+  useZone?: string
 }
 
 interface RoadFrontage {
@@ -135,6 +139,12 @@ interface RegulationState {
   far: FloorAreaRatio
   heightLimit: HeightLimit
   setbacks: Setback[]
+  /** 자동 조회 시각(ISO). stale 판정 기준 */
+  fetchedAt?: string
+  /** 적용값 근거 표기 (조례/시행령 조문) */
+  basis?: { bcr: string; far: string }
+  /** 합필 필지의 용도지역이 서로 다르면 true — 안분 계산 미지원 경고용 */
+  mixedZones?: boolean
 }
 
 // --- program (M2/M3 입력) -----------------------------------------------------
