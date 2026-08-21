@@ -243,6 +243,24 @@ export function PlanNode() {
   );
 }
 
+export function DrawingsNode() {
+  const hasMass = useProjectStore(
+    (s) => !!s.massing.scenarios.find((sc) => sc.id === s.meta.activeScenarioId)?.footprint,
+  );
+  const floors = useProjectStore((s) => s.massing.floorTable.length);
+  return (
+    <NodeCard kind="drawings" title="허가도서 준비 (DRAFT)">
+      {!hasMass ? (
+        <p className="text-zinc-400">매스 활성화 후 도서 목록·표·IFC</p>
+      ) : (
+        <p className="text-[10px] text-zinc-400">
+          도서 목록 · 표제부/면적표/주차 · IFC{floors ? " · 층표 연동" : " (조닝 전)"}
+        </p>
+      )}
+    </NodeCard>
+  );
+}
+
 export function BuildingNode() {
   const massing = useProjectStore((s) => s.massing);
   const p = massing.placement;

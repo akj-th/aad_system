@@ -9,6 +9,7 @@ import { useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import BuildingPanel from "@/components/BuildingPanel";
 import CapturePanel from "@/components/CapturePanel";
+import DrawingsPanel from "@/components/DrawingsPanel";
 import FeasibilityPanel from "@/components/FeasibilityPanel";
 import MassPanel from "@/components/MassPanel";
 import PlanPanel from "@/components/PlanPanel";
@@ -71,7 +72,9 @@ export default function ExpansionOverlay() {
     <div data-testid="expansion-overlay">
       <aside
         className={`fixed inset-y-0 right-0 z-50 flex flex-col gap-6 overflow-y-auto border-l border-zinc-200 bg-white p-4 text-sm shadow-xl ${
-          expandedKind === "report" ? "w-[62vw] min-w-[640px]" : "w-96"
+          expandedKind === "report" || expandedKind === "drawings"
+            ? "w-[62vw] min-w-[640px]"
+            : "w-96"
         }`}
       >
         <div className="flex items-center justify-between">
@@ -94,6 +97,7 @@ export default function ExpansionOverlay() {
         {expandedKind === "mass" && <MassPanel />}
         {expandedKind === "zoning" && <ZoningPanel />}
         {expandedKind === "plan" && <PlanPanel />}
+        {expandedKind === "drawings" && <DrawingsPanel />}
         {expandedKind === "viewport" && (
           <>
             <SitePanel />

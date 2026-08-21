@@ -14,6 +14,7 @@ import "@xyflow/react/dist/style.css";
 import {
   BuildingNode,
   CaptureNode,
+  DrawingsNode,
   FeasibilityNode,
   MassNode,
   PlanNode,
@@ -40,6 +41,7 @@ const nodeTypes = {
   mass: MassNode,
   zoning: ZoningNode,
   plan: PlanNode,
+  drawings: DrawingsNode,
   building: BuildingNode,
   viewport: ViewportNode,
   capture: CaptureNode,
@@ -61,6 +63,7 @@ function buildGraph(captures: CaptureRecord[]): {
     { id: "mass", type: "mass", position: { x: 360, y: 300 }, data: {} },
     { id: "zoning", type: "zoning", position: { x: 360, y: 460 }, data: {} },
     { id: "plan", type: "plan", position: { x: 680, y: 460 }, data: {} },
+    { id: "drawings", type: "drawings", position: { x: 1000, y: 460 }, data: {} },
     { id: "building", type: "building", position: { x: 360, y: 120 }, data: {} },
     { id: "viewport", type: "viewport", position: { x: 680, y: 80 }, data: {} },
   ];
@@ -70,6 +73,7 @@ function buildGraph(captures: CaptureRecord[]): {
     { id: "e-mass-viewport", source: "mass", target: "viewport" },
     { id: "e-mass-zoning", source: "mass", target: "zoning" },
     { id: "e-zoning-plan", source: "zoning", target: "plan" },
+    { id: "e-plan-drawings", source: "plan", target: "drawings" },
     { id: "e-site-regulation", source: "site", target: "regulation" },
     { id: "e-regulation-program", source: "regulation", target: "program" },
     { id: "e-program-feasibility", source: "program", target: "feasibility" },

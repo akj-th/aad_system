@@ -18,6 +18,7 @@ export type NodeKind =
   | "mass"
   | "zoning"
   | "plan"
+  | "drawings"
   | "building"
   | "viewport"
   | "capture"
