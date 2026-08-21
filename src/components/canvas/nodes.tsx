@@ -4,6 +4,7 @@
 // 노드 배열 재구성 없이도 카드가 갱신된다.
 
 import type { Node, NodeProps } from "@xyflow/react";
+import { useShallow } from "zustand/react/shallow";
 import NodeCard from "./NodeCard";
 import { useProjectStore } from "@/store/project";
 import { useUiStore } from "@/store/ui";
@@ -129,6 +130,37 @@ export function FeasibilityNode() {
           </p>
         </>
       )}
+    </NodeCard>
+  );
+}
+
+export function ReportNode() {
+  // 객체를 돌려주는 셀렉터는 useShallow로 감싸야 매 변경마다 리렌더 루프가 안 생긴다
+  const ready = useProjectStore(
+    useShallow((s) => ({
+      site: s.site.parcels.length > 0,
+      regulation: !!s.regulation.useZone,
+      program: s.program.grossArea > 0,
+      feasibility: s.feasibility.results.totalCost > 0,
+      renders: s.captures.reduce((n, c) => n + c.renders.length, 0),
+    })),
+  );
+  const done = [ready.site, ready.regulation, ready.program, ready.feasibility].filter(Boolean).length;
+  return (
+    <NodeCard kind="report" title="기획 검토 리포트">
+      <p>
+        섹션 준비 {done}/4 · 렌더 {ready.renders}건
+      </p>
+      <p className="text-[10px] text-zinc-400">
+        {[
+          ready.site && "대지",
+          ready.regulation && "법규",
+          ready.program && "규모",
+          ready.feasibility && "사업성",
+        ]
+          .filter(Boolean)
+          .join(" · ") || "더블클릭해 미리보기"}
+      </p>
     </NodeCard>
   );
 }

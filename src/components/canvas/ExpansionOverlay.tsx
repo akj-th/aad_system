@@ -13,6 +13,7 @@ import FeasibilityPanel from "@/components/FeasibilityPanel";
 import ProgramPanel from "@/components/ProgramPanel";
 import RegulationPanel from "@/components/RegulationPanel";
 import RenderPanel from "@/components/RenderPanel";
+import ReportPanel from "@/components/ReportPanel";
 import SitePanel from "@/components/SitePanel";
 import { useProjectStore } from "@/store/project";
 import { useUiStore } from "@/store/ui";
@@ -65,7 +66,11 @@ export default function ExpansionOverlay() {
   // 아래에 깔린다 — body로 portal해서 지도 위(z-50)에 띄운다.
   return createPortal(
     <div data-testid="expansion-overlay">
-      <aside className="fixed inset-y-0 right-0 z-50 flex w-96 flex-col gap-6 overflow-y-auto border-l border-zinc-200 bg-white p-4 text-sm shadow-xl">
+      <aside
+        className={`fixed inset-y-0 right-0 z-50 flex flex-col gap-6 overflow-y-auto border-l border-zinc-200 bg-white p-4 text-sm shadow-xl ${
+          expandedKind === "report" ? "w-[62vw] min-w-[640px]" : "w-96"
+        }`}
+      >
         <div className="flex items-center justify-between">
           <button
             className="rounded bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700"
@@ -81,6 +86,7 @@ export default function ExpansionOverlay() {
         {expandedKind === "regulation" && <RegulationPanel />}
         {expandedKind === "program" && <ProgramPanel />}
         {expandedKind === "feasibility" && <FeasibilityPanel />}
+        {expandedKind === "report" && <ReportPanel />}
         {expandedKind === "building" && <BuildingPanel />}
         {expandedKind === "viewport" && (
           <>

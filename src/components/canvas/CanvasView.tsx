@@ -18,6 +18,7 @@ import {
   ProgramNode,
   RegulationNode,
   RenderNode,
+  ReportNode,
   SiteNode,
   ViewportNode,
 } from "./nodes";
@@ -32,6 +33,7 @@ const nodeTypes = {
   regulation: RegulationNode,
   program: ProgramNode,
   feasibility: FeasibilityNode,
+  report: ReportNode,
   building: BuildingNode,
   viewport: ViewportNode,
   capture: CaptureNode,
@@ -49,6 +51,7 @@ function buildGraph(captures: CaptureRecord[]): {
     { id: "regulation", type: "regulation", position: { x: 360, y: -200 }, data: {} },
     { id: "program", type: "program", position: { x: 680, y: -200 }, data: {} },
     { id: "feasibility", type: "feasibility", position: { x: 1000, y: -200 }, data: {} },
+    { id: "report", type: "report", position: { x: 1320, y: -200 }, data: {} },
     { id: "building", type: "building", position: { x: 360, y: 120 }, data: {} },
     { id: "viewport", type: "viewport", position: { x: 680, y: 80 }, data: {} },
   ];
@@ -57,6 +60,9 @@ function buildGraph(captures: CaptureRecord[]): {
     { id: "e-site-regulation", source: "site", target: "regulation" },
     { id: "e-regulation-program", source: "regulation", target: "program" },
     { id: "e-program-feasibility", source: "program", target: "feasibility" },
+    { id: "e-feasibility-report", source: "feasibility", target: "report" },
+    // 리포트는 최신 렌더 이미지도 소비한다
+    { id: "e-viewport-report", source: "viewport", target: "report", style: { strokeDasharray: "4 4" } },
     { id: "e-building-viewport", source: "building", target: "viewport" },
   ];
 
