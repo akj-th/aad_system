@@ -23,11 +23,17 @@ export interface GlbReport {
   };
 }
 
-/** Cesium 재귀 순회가 감당하는 대략적 한계 (경험값) */
+// 한계값은 실측 기준. 조각 51,853개 / 노드 8,073개 / 100MB 모델에서
+// Cesium이 로딩 중 "Maximum call stack size exceeded"로 렌더 루프를 멈췄다.
+// 원인은 계층 깊이가 아니라 한 번에 처리하는 조각 수다.
 const DEPTH_FATAL = 400;
 const DEPTH_WARN = 80;
-const NODE_WARN = 20_000;
-const PRIM_WARN = 30_000;
+const PRIM_FATAL = 20_000;
+const PRIM_WARN = 5_000;
+const NODE_FATAL = 5_000;
+const NODE_WARN = 1_500;
+const SIZE_FATAL = 80;
+const SIZE_WARN = 30;
 
 interface GltfJson {
   asset?: { generator?: string };
@@ -144,14 +150,23 @@ export function inspectGlb(buffer: ArrayBuffer, fileName: string): GlbReport {
   } else if (maxDepth >= DEPTH_WARN) {
     warnings.push(`노드 계층이 ${maxDepth}단으로 깊습니다 — 성능 저하나 렌더 오류가 날 수 있습니다`);
   }
-  if (nodes.length >= NODE_WARN) {
-    warnings.push(`노드가 ${nodes.length.toLocaleString("ko-KR")}개로 많습니다 — 로딩이 느립니다`);
+  const n = (v: number) => v.toLocaleString("ko-KR");
+  if (primitives >= PRIM_FATAL) {
+    fatal.push(
+      `메시 조각이 ${n(primitives)}개입니다 (한계 ${n(PRIM_FATAL)}개) — 로딩 중 스택 오버플로로 지도가 멈춥니다. 재질별 병합이 필요합니다`,
+    );
+  } else if (primitives >= PRIM_WARN) {
+    warnings.push(`메시 조각이 ${n(primitives)}개입니다 — 병합하면 훨씬 가벼워집니다`);
   }
-  if (primitives >= PRIM_WARN) {
-    warnings.push(`메시 조각이 ${primitives.toLocaleString("ko-KR")}개입니다 — 병합 후 내보내기를 권합니다`);
+  if (nodes.length >= NODE_FATAL) {
+    fatal.push(`노드가 ${n(nodes.length)}개입니다 (한계 ${n(NODE_FATAL)}개) — 병합 후 내보내세요`);
+  } else if (nodes.length >= NODE_WARN) {
+    warnings.push(`노드가 ${n(nodes.length)}개로 많습니다 — 로딩이 느립니다`);
   }
-  if (fileMB > 150) {
-    warnings.push(`파일이 ${fileMB.toFixed(0)}MB로 큽니다 — 브라우저 메모리 부족이 날 수 있습니다`);
+  if (fileMB >= SIZE_FATAL) {
+    fatal.push(`파일이 ${fileMB.toFixed(0)}MB입니다 (권장 ${SIZE_FATAL}MB 미만) — 브라우저 메모리가 부족할 수 있습니다`);
+  } else if (fileMB >= SIZE_WARN) {
+    warnings.push(`파일이 ${fileMB.toFixed(0)}MB로 큽니다 — 로딩이 오래 걸립니다`);
   }
   const unsupported = extensions.filter((e) => e === "KHR_draco_mesh_compression");
   if (unsupported.length) {

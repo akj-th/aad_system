@@ -86,6 +86,22 @@ src/
 
 `parking.json`의 `categories[].stackOrder`(적층 순서)와 `basement`(주차 1대 소요면적)는 조닝에도 쓰인다.
 
+## glb 모델 준비 (중요)
+
+SketchUp 등에서 내보낸 glb는 **메시 조각이 수만 개**가 되기 쉽고, 그대로 올리면
+브이월드 3D 뷰어(Cesium)가 로딩 중 `Maximum call stack size exceeded`로 렌더를 멈춘다.
+업로드 전에 병합할 것:
+
+```bash
+npm run optimize-glb -- "C:/경로/모델.glb"
+```
+
+형태를 바꾸는 단순화(simplify)와 호환성이 불확실한 draco 압축·GPU 인스턴싱은 끄고
+조각 병합만 한다. 실측: 조각 48,000 → 1, 노드 8,000 → 1.
+
+앱은 업로드 전에 구조를 검사해 위험하면 막고(조각 2만·노드 5천·80MB 초과 등),
+그래도 렌더 에러가 나면 모델만 제거하고 지도를 되살린다.
+
 ## 캔버스 노드 흐름
 
 ```

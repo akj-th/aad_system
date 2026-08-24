@@ -203,13 +203,20 @@ export default function BuildingPanel() {
           </p>
           {!modelReport.ok && (
             <div className="space-y-1 border-t border-red-200 pt-1 text-[11px] text-zinc-700">
-              <p className="font-medium">해결 방법</p>
+              <p className="font-medium">해결 방법 — 조각 병합</p>
               <p>
-                SketchUp: 내보내기 전 모델 전체 선택 → 우클릭 Explode를 몇 차례 반복해
-                중첩 그룹·컴포넌트를 풀거나, 불필요한 그룹을 정리하세요.
+                가장 확실한 방법은 명령 한 줄로 병합하는 것입니다. 프로젝트 폴더에서:
+              </p>
+              <code className="block break-all rounded bg-zinc-900 px-1.5 py-1 text-[10px] text-zinc-100">
+                npm run optimize-glb -- &quot;C:/경로/모델.glb&quot;
+              </code>
+              <p className="text-[10px] text-zinc-500">
+                조각을 병합하고 형태는 그대로 둡니다(단순화·압축 없음). 같은 폴더에
+                -optimized.glb가 생깁니다.
               </p>
               <p>
-                또는 Blender로 glb를 열어 다시 내보내면 계층이 평탄해집니다 (가장 확실).
+                Blender를 쓴다면: 전체 선택(A) → 병합(Ctrl+J) → glb 재내보내기.
+                SketchUp에서는 재질 수를 줄이고 불필요한 그룹·컴포넌트를 정리한 뒤 내보내세요.
               </p>
               <button
                 className="rounded bg-zinc-900 px-2 py-1 text-[11px] text-white"
