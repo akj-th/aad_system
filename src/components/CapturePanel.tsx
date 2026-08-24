@@ -3,6 +3,14 @@
 import { useState } from "react";
 import { useProjectStore } from "@/store/project";
 import { capture2Pass } from "@/lib/map/capture";
+import {
+  getBuildingsVisible,
+  setBuildingsVisible,
+  setViewpoint,
+  VIEWPOINTS,
+  type ViewpointKind,
+} from "@/lib/map/controller";
+import { bbox, centroid } from "@turf/turf";
 
 function fmt(n: number, digits = 5): string {
   return n.toFixed(digits);
@@ -20,6 +28,64 @@ export default function CapturePanel({ captureId }: { captureId?: string }) {
 
   const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busyView, setBusyView] = useState<ViewpointKind | null>(null);
+
+  // 시점 이동 대상 = 활성 매스 → glb 배치 → 대지 중심
+  // (객체를 돌려주는 셀렉터는 매 렌더마다 새 참조가 되므로 원시 조각으로 받아 계산한다)
+  const activeMass = useProjectStore((s) =>
+    s.massing.scenarios.find((x) => x.id === s.meta.activeScenarioId),
+  );
+  const placement = useProjectStore((s) => s.massing.placement);
+  const boundary = useProjectStore((s) => s.site.boundary);
+
+  let target: {
+    lon: number;
+    lat: number;
+    height: number;
+    footprintRadius?: number;
+  } | null = null;
+  if (activeMass?.footprint) {
+    const feature = { type: "Feature" as const, properties: {}, geometry: activeMass.footprint };
+    const c = centroid(feature).geometry.coordinates;
+    // 바닥 bbox 대각선의 절반 = 외접 반경 근사
+    const [minLon, minLat, maxLon, maxLat] = bbox(feature);
+    const w = (maxLon - minLon) * 111_320 * Math.cos((c[1] * Math.PI) / 180);
+    const d = (maxLat - minLat) * 111_320;
+    target = {
+      lon: c[0],
+      lat: c[1],
+      height: activeMass.height ?? 20,
+      footprintRadius: Math.hypot(w, d) / 2,
+    };
+  } else if (placement) {
+    target = { lon: placement.lon, lat: placement.lat, height: 20 };
+  } else if (boundary) {
+    const c = centroid({ type: "Feature", properties: {}, geometry: boundary })
+      .geometry.coordinates;
+    target = { lon: c[0], lat: c[1], height: 15 };
+  }
+
+  /** 프리셋 시점으로 이동 후 그 자리에서 2패스 캡처 (이미지 변환이 아니라 실제 재촬영) */
+  async function captureFrom(kind: ViewpointKind) {
+    if (!target) return;
+    setBusyView(kind);
+    setError(null);
+    // 저층 시점은 도심에서 옆 건물에 가려진다 — 그 시점에서만 주변 건물을 잠시 숨긴다
+    const lowAngle = kind === "street" || kind === "detail";
+    const buildingsWere = getBuildingsVisible();
+    try {
+      if (lowAngle && buildingsWere) setBuildingsVisible(false);
+      setViewpoint(kind, target);
+      // 타일·모델이 새 시점에서 로드될 시간을 준다
+      await new Promise((r) => setTimeout(r, 2500));
+      addCapture(await capture2Pass());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "캡처 실패");
+    } finally {
+      if (lowAngle && buildingsWere) setBuildingsVisible(true);
+      setBusyView(null);
+    }
+  }
 
   async function runCapture() {
     setCapturing(true);
@@ -54,6 +120,32 @@ export default function CapturePanel({ captureId }: { captureId?: string }) {
           건물 glb를 올리거나 매스 대안을 활성화해야 캡처할 수 있습니다
         </p>
       )}
+
+      {/* 뷰포인트 프리셋 — 카메라를 실제로 옮겨 재촬영하므로 형태 정합이 유지된다 */}
+      {hasModel && target && (
+        <div className="space-y-1" data-testid="viewpoint-presets">
+          <p className="text-xs font-semibold text-zinc-700">시점 프리셋에서 캡처</p>
+          <div className="grid grid-cols-3 gap-1">
+            {VIEWPOINTS.map((v) => (
+              <button
+                key={v.kind}
+                className="rounded bg-zinc-100 px-1 py-1.5 text-[11px] hover:bg-zinc-200 disabled:opacity-40"
+                onClick={() => captureFrom(v.kind)}
+                disabled={capturing || busyView !== null}
+                title={v.desc}
+                data-testid={`viewpoint-${v.kind}`}
+              >
+                {busyView === v.kind ? "…" : v.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-zinc-400">
+            이미지 변환이 아니라 3D 카메라를 옮겨 다시 촬영합니다 (형태 정합 유지).
+            스트리트·디테일은 옆 건물에 가리지 않도록 주변 3D 건물을 잠시 숨겨 촬영합니다.
+          </p>
+        </div>
+      )}
+
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       {latest && (

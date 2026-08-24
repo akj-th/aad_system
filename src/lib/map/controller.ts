@@ -275,6 +275,83 @@ export function flyToMass() {
   if (entities.length) viewer.flyTo(entities, { duration: 1.2 });
 }
 
+// --- 뷰포인트 프리셋 ----------------------------------------------------------
+// CAI는 렌더 이미지를 다른 시점으로 "변환"하지만, 우리는 3D 카메라를 실제로 옮겨
+// 다시 캡처한다 — 시점이 바뀌어도 형태·주변 맥락의 정합이 유지된다 (C-3).
+
+export type ViewpointKind = "bird" | "corner" | "front" | "street" | "detail";
+
+export const VIEWPOINTS: { kind: ViewpointKind; label: string; desc: string }[] = [
+  { kind: "bird", label: "조감", desc: "대지 전체와 주변 맥락" },
+  { kind: "corner", label: "코너", desc: "가로 모서리에서 본 2면" },
+  { kind: "front", label: "정면", desc: "주 접도 방향 정면" },
+  { kind: "street", label: "스트리트", desc: "보행자 눈높이" },
+  { kind: "detail", label: "디테일", desc: "저층부 근접" },
+];
+
+interface ViewpointSpec {
+  /** 건물 높이 대비 카메라 거리 배수 (바닥 반경에 더해진다) */
+  rangeFactor: number;
+  /** 최소 이격(m) — 건물 외피에서 이만큼은 떨어진다 */
+  minStandoff: number;
+  pitchDeg: number;
+  /** 정면(0) 기준 상대 방위각 */
+  headingOffset: number;
+  /** 주시점 높이 = 건물 높이 × 이 값 */
+  targetHeightFactor: number;
+  /** 보행자 시점 등 고정 주시 높이(m) */
+  eyeHeight?: number;
+}
+
+const SPECS: Record<ViewpointKind, ViewpointSpec> = {
+  bird: { rangeFactor: 2.6, minStandoff: 40, pitchDeg: -45, headingOffset: -30, targetHeightFactor: 0.5 },
+  corner: { rangeFactor: 1.6, minStandoff: 30, pitchDeg: -20, headingOffset: -45, targetHeightFactor: 0.45 },
+  front: { rangeFactor: 1.6, minStandoff: 30, pitchDeg: -12, headingOffset: 0, targetHeightFactor: 0.45 },
+  // 도심에서 진짜 보행자 눈높이는 옆 건물에 가려지므로, 저층부가 보이는 낮은 근경으로 잡는다
+  street: { rangeFactor: 0.8, minStandoff: 60, pitchDeg: -10, headingOffset: -15, targetHeightFactor: 0.3, eyeHeight: 12 },
+  detail: { rangeFactor: 0.5, minStandoff: 35, pitchDeg: -8, headingOffset: -20, targetHeightFactor: 0.25 },
+};
+
+export interface ViewpointTarget {
+  lon: number;
+  lat: number;
+  /** 건물 높이(m) */
+  height: number;
+  /** 바닥 외접 반경(m) — 카메라가 건물 안에 박히지 않도록 이격의 기준이 된다 */
+  footprintRadius?: number;
+  /** 정면으로 삼을 방위각(도). 미지정 시 남측(180) */
+  frontHeading?: number;
+}
+
+/** 프리셋 시점으로 카메라를 이동시킨다 (즉시 반영, 캡처 직전 사용) */
+export function setViewpoint(kind: ViewpointKind, t: ViewpointTarget) {
+  const viewer = getViewer();
+  if (!viewer) return;
+  const spec = SPECS[kind];
+  const h = Math.max(6, t.height);
+  const radius = Math.max(8, t.footprintRadius ?? 15);
+  // 바닥 반경 밖으로 나간 뒤 시점별 이격을 더한다 (건물 내부 진입 방지)
+  const range = radius + Math.max(spec.minStandoff, h * spec.rangeFactor);
+  const heading = ((t.frontHeading ?? 180) + spec.headingOffset) % 360;
+
+  const terrain = terrainHeightAt(t.lon, t.lat) ?? 0;
+  const targetHeight = spec.eyeHeight
+    ? terrain + spec.eyeHeight
+    : terrain + h * spec.targetHeightFactor;
+
+  viewer.camera.lookAt(
+    Cesium.Cartesian3.fromDegrees(t.lon, t.lat, targetHeight),
+    new Cesium.HeadingPitchRange(
+      Cesium.Math.toRadians(heading),
+      Cesium.Math.toRadians(spec.pitchDeg),
+      range,
+    ),
+  );
+  // lookAt은 카메라를 변환에 고정한다 — 이후 자유 조작을 위해 해제
+  viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+  viewer.scene.requestRender();
+}
+
 // --- 태양·그림자 -------------------------------------------------------------
 
 // 브이월드는 태양과 무관한 고정 광원을 쓴다 (런타임 확인). 그림자를 켜면

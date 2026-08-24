@@ -5,7 +5,13 @@
 // 부르면 빈 이미지가 나온다. scene.postRender 콜백 안에서는 드로잉 버퍼가
 // 아직 유효하므로 그 시점에 캡처한다 (B-4 기술 주의사항의 우회법).
 
-import { getCameraPose, getViewer, type CameraPose } from "./controller";
+import {
+  getCameraPose,
+  getLabelsVisible,
+  getViewer,
+  setLabelsVisible,
+  type CameraPose,
+} from "./controller";
 
 const MODEL_ENTITY_ID = "aad-building-model";
 const SITE_ENTITY_PREFIX = "aad-site-";
@@ -183,21 +189,13 @@ export async function capture2Pass(): Promise<CaptureResult> {
   };
 
   try {
-    // 공통: 필지 하이라이트·등고선·명칭은 캡처에서 제외 (POI는 표시 옵션과 무관하게 숨김)
+    // 공통: 필지 하이라이트·등고선·명칭은 캡처에서 제외 (POI는 표시 옵션과 무관하게 숨김).
+    // 레이어 가시성은 controller가 매 프레임 강제하므로 반드시 그쪽 API로 꺼야 한다
+    // (직접 p.show=false로 끄면 강제 리스너가 다음 프레임에 되살린다).
     for (const { entity } of saved.hiddenEntities) entity.show = false;
     scene.globe.material = undefined;
-    const poiShown: { p: { show: boolean } }[] = [];
-    for (let i = 0; i < scene.primitives.length; i++) {
-      const p = scene.primitives.get(i);
-      if (
-        p instanceof Cesium.Cesium3DTileset &&
-        String(p._url ?? "").includes("/TDServer/services/poi/") &&
-        p.show
-      ) {
-        poiShown.push({ p });
-        p.show = false;
-      }
-    }
+    const labelsWere = getLabelsVisible();
+    if (labelsWere) setLabelsVisible(false);
 
     // --- A패스: 뷰티 — 건물 무광 흰색, 그림자 on, 지형 저채도 ---
     paintBuilding(Cesium.Color.WHITE);
@@ -235,7 +233,7 @@ export async function capture2Pass(): Promise<CaptureResult> {
 
     const silhouette = await captureAfterFrames(viewer, 4);
 
-    for (const { p } of poiShown) p.show = true;
+    if (labelsWere) setLabelsVisible(true);
 
     const mask = await buildMask(silhouette);
     return { camera, clockTime, beauty, silhouette, mask };
