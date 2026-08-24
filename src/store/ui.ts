@@ -45,6 +45,10 @@ interface UiStore {
   lastSiteChangeAt: number;
   markSiteChange(): void;
 
+  /** 로컬 자동 저장 상태 (CAI의 "로컬 저장됨" 배지에 대응) */
+  saveState: { status: "idle" | "saving" | "saved" | "error"; at?: string; restored?: boolean };
+  setSaveState(s: UiStore["saveState"]): void;
+
   // --- 건물 외곽선 직접 그리기 (WP 방식) ---
   /** 그리는 중인 꼭짓점 (대지 중심 기준 로컬 미터). null = 드로잉 비활성 */
   footprintDraft: [number, number][] | null;
@@ -73,6 +77,9 @@ export const useUiStore = create<UiStore>((set) => ({
   markUpstreamChange: () => set({ lastUpstreamChangeAt: Date.now() }),
   lastSiteChangeAt: 0,
   markSiteChange: () => set({ lastSiteChangeAt: Date.now() }),
+
+  saveState: { status: "idle" },
+  setSaveState: (saveState) => set({ saveState }),
 
   footprintDraft: null,
   gridModule: 1,

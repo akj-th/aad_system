@@ -32,6 +32,7 @@ import { useProjectStore, type CaptureRecord } from "@/store/project";
 import { useUiStore, type NodeKind } from "@/store/ui";
 import ExpansionOverlay from "./ExpansionOverlay";
 import CanvasToolbar from "./CanvasToolbar";
+import AutoSave from "./AutoSave";
 
 const nodeTypes = {
   site: SiteNode,
@@ -198,6 +199,7 @@ export default function CanvasView() {
         <Background gap={20} color="#d4d4d8" />
         <Controls showInteractive={false} />
       </ReactFlow>
+      <AutoSave />
       <CanvasToolbar />
       <ExpansionOverlay />
     </div>

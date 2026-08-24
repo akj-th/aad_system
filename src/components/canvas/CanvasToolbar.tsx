@@ -2,6 +2,8 @@
 
 import { useRef, useState } from "react";
 import { useProjectStore } from "@/store/project";
+import { useUiStore } from "@/store/ui";
+import { clearLocal } from "@/lib/persist";
 
 /** 캔버스 상단 툴바 — 프로젝트명, 상태 JSON 내보내기/불러오기 (B-4 Phase 5) */
 export default function CanvasToolbar() {
@@ -10,6 +12,7 @@ export default function CanvasToolbar() {
   const exportProject = useProjectStore((s) => s.exportProject);
   const importProject = useProjectStore((s) => s.importProject);
   const resetProject = useProjectStore((s) => s.resetProject);
+  const save = useUiStore((s) => s.saveState);
   const fileRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -86,11 +89,25 @@ export default function CanvasToolbar() {
       <button
         className="rounded px-2 py-1 text-zinc-400 hover:bg-red-50 hover:text-red-600"
         onClick={() => {
-          if (confirm("현재 프로젝트를 비우고 새로 시작할까요?")) resetProject();
+          if (confirm("현재 프로젝트를 비우고 새로 시작할까요? (로컬 저장본도 삭제됩니다)")) {
+            void clearLocal();
+            resetProject();
+          }
         }}
       >
         새 프로젝트
       </button>
+
+      {/* 로컬 자동 저장 상태 */}
+      <span className="flex items-center gap-1 text-[11px]" data-testid="save-badge">
+        {save.status === "saving" && <span className="text-zinc-400">저장 중…</span>}
+        {save.status === "saved" && (
+          <span className="text-emerald-600" title={save.at ? new Date(save.at).toLocaleString("ko-KR") : ""}>
+            ● {save.restored ? "이어서 작업 중" : "로컬 저장됨"}
+          </span>
+        )}
+        {save.status === "error" && <span className="text-red-600">저장 실패</span>}
+      </span>
       {message && (
         <span className="text-[11px] text-blue-600" data-testid="toolbar-message">
           {message}

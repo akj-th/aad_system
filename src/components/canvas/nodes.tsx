@@ -15,6 +15,13 @@ function formatArea(sqm: number): string {
   return `${sqm.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}㎡`;
 }
 
+function downloadImage(dataUrl: string, name: string) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = `${name.replace(/[:.]/g, "-")}.png`;
+  a.click();
+}
+
 export type CaptureNodeType = Node<{ captureId: string }, "capture">;
 export type RenderNodeType = Node<
   { captureId: string; renderId: string },
@@ -325,6 +332,7 @@ export function CaptureNode({ data }: NodeProps<CaptureNodeType>) {
   const capture = useProjectStore((s) =>
     s.captures.find((c) => c.id === data.captureId),
   );
+  const removeCapture = useProjectStore((s) => s.removeCapture);
   const lastUpstreamChangeAt = useUiStore((s) => s.lastUpstreamChangeAt);
   if (!capture) return null;
   const stale = new Date(capture.createdAt).getTime() < lastUpstreamChangeAt;
@@ -334,6 +342,8 @@ export function CaptureNode({ data }: NodeProps<CaptureNodeType>) {
       kind="capture"
       title={new Date(capture.createdAt).toLocaleTimeString("ko-KR")}
       stale={stale}
+      onDownload={() => downloadImage(capture.beauty, `capture-${capture.createdAt}`)}
+      onDelete={() => removeCapture(capture.id)}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -363,6 +373,7 @@ export function RenderNode({ data }: NodeProps<RenderNodeType>) {
       kind="render"
       title={render.options.material.slice(0, 24)}
       stale={stale}
+      onDownload={() => downloadImage(render.image, `render-${render.createdAt}`)}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img

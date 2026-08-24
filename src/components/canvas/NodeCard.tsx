@@ -43,6 +43,8 @@ export default function NodeCard({
   title,
   stale = false,
   badge,
+  onDownload,
+  onDelete,
   children,
 }: {
   kind: NodeKind;
@@ -50,15 +52,48 @@ export default function NodeCard({
   stale?: boolean;
   /** stale 외의 경고 배지 (예: "법정 초과") */
   badge?: string;
+  /** 호버 액션 — 산출물 노드(캡처·렌더)에서만 쓴다 */
+  onDownload?: () => void;
+  onDelete?: () => void;
   children: ReactNode;
 }) {
   return (
     <div
-      className={`w-60 rounded-lg border border-zinc-200 bg-white shadow-sm transition-opacity ${
+      className={`group relative w-60 rounded-lg border border-zinc-200 bg-white shadow-sm transition-opacity ${
         stale ? "opacity-50" : ""
       }`}
       data-testid={`node-${kind}`}
     >
+      {(onDownload || onDelete) && (
+        <div className="absolute -top-3 right-1 z-10 hidden gap-1 group-hover:flex">
+          {onDownload && (
+            <button
+              className="rounded bg-white px-1.5 py-0.5 text-[11px] shadow ring-1 ring-zinc-200 hover:bg-zinc-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownload();
+              }}
+              title="다운로드"
+              data-testid="node-download"
+            >
+              ⤓
+            </button>
+          )}
+          {onDelete && (
+            <button
+              className="rounded bg-white px-1.5 py-0.5 text-[11px] text-red-600 shadow ring-1 ring-zinc-200 hover:bg-red-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              title="삭제"
+              data-testid="node-delete"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !bg-zinc-400" />
       <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-2">
         <span
