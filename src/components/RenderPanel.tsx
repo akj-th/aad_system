@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useProjectStore } from "@/store/project";
 import CompareSlider from "./CompareSlider";
+import SketchCanvas from "./SketchCanvas";
 
 const TIME_OPTIONS = ["맑은 낮", "황금시간대(늦은 오후)", "일몰 직후", "야간"];
 const SEASON_OPTIONS = ["봄", "여름", "가을", "겨울"];
@@ -39,9 +40,16 @@ export default function RenderPanel({ captureId }: { captureId?: string }) {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [compareId, setCompareId] = useState<string | null>(null);
+  /** 결과 위 손스케치 재생성 루프 */
+  const [sketchMode, setSketchMode] = useState(false);
+  const [sketchImage, setSketchImage] = useState<string | null>(null);
 
-  async function generate() {
+  async function generate(resketch = false) {
     if (!latest) return;
+    if (resketch && !sketchImage) {
+      setError("스케치를 그린 뒤 재생성하세요");
+      return;
+    }
     setGenerating(true);
     setError(null);
     try {
@@ -49,7 +57,8 @@ export default function RenderPanel({ captureId }: { captureId?: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          beauty: latest.beauty,
+          // 재생성 루프에서는 주석이 합성된 렌더 이미지를 입력으로 보낸다
+          beauty: resketch ? sketchImage : latest.beauty,
           silhouette: latest.silhouette,
           options: {
             material,
@@ -57,6 +66,7 @@ export default function RenderPanel({ captureId }: { captureId?: string }) {
             season: SEASON_EN[season] ?? season,
             extra,
             useSilhouette,
+            mode: resketch ? "resketch" : "initial",
           },
         }),
       });
@@ -74,9 +84,17 @@ export default function RenderPanel({ captureId }: { captureId?: string }) {
       addRender(latest.id, {
         image: json.image,
         prompt: json.prompt ?? "",
-        options: { material, timeOfDay, season, extra, useSilhouette },
+        options: {
+          material: resketch ? `${material} (스케치 재생성)` : material,
+          timeOfDay,
+          season,
+          extra,
+          useSilhouette,
+        },
       });
       setCompareId(null); // 최신 결과를 기본 비교 대상으로
+      setSketchMode(false);
+      setSketchImage(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "생성 실패");
     } finally {
@@ -155,7 +173,7 @@ export default function RenderPanel({ captureId }: { captureId?: string }) {
 
           <button
             className="w-full rounded bg-emerald-600 py-2 font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-            onClick={generate}
+            onClick={() => generate(false)}
             disabled={generating}
             data-testid="render-button"
           >
@@ -169,7 +187,45 @@ export default function RenderPanel({ captureId }: { captureId?: string }) {
 
           {compared && (
             <div className="space-y-2" data-testid="render-result">
-              <CompareSlider before={latest.beauty} after={compared.image} />
+              {sketchMode ? (
+                <>
+                  <div className="rounded bg-amber-50 p-2 text-[11px] text-amber-800">
+                    결과 위에 <strong>고칠 부분을 그리고 글로 적으세요</strong>. 주석이 있는
+                    영역만 수정되고 나머지는 그대로 유지됩니다.
+                  </div>
+                  <SketchCanvas src={compared.image} onCommit={setSketchImage} />
+                  <div className="flex gap-1">
+                    <button
+                      className="flex-1 rounded bg-zinc-100 py-1.5 text-xs hover:bg-zinc-200"
+                      onClick={() => {
+                        setSketchMode(false);
+                        setSketchImage(null);
+                      }}
+                    >
+                      취소
+                    </button>
+                    <button
+                      className="flex-[2] rounded bg-emerald-600 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                      onClick={() => generate(true)}
+                      disabled={generating || !sketchImage}
+                      data-testid="resketch-button"
+                    >
+                      {generating ? "재생성 중…" : "스케치대로 재생성"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <CompareSlider before={latest.beauty} after={compared.image} />
+                  <button
+                    className="w-full rounded border border-emerald-600 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                    onClick={() => setSketchMode(true)}
+                    data-testid="sketch-mode"
+                  >
+                    ✏ 결과 위에 스케치해서 수정
+                  </button>
+                </>
+              )}
               <p className="text-[10px] text-zinc-400">
                 AI 생성 — 실제 설계안과 재질·주변 환경이 다를 수 있음
               </p>
