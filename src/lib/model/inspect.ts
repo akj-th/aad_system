@@ -20,6 +20,49 @@ export interface GlbReport {
     hasCycle: boolean;
     extensions: string[];
     generator?: string;
+    /** 모델 로컬 단위 바운딩박스 크기 [x, y, z] */
+    size?: [number, number, number];
+  };
+  /** 단위 추정 결과 — 업로드 시 초기 스케일로 쓴다 */
+  unit: UnitGuess;
+}
+
+export interface UnitGuess {
+  /** 미터로 만들기 위해 곱할 값 (mm면 0.001) */
+  scale: number;
+  label: string;
+  /** 스케일 적용 후 실치수 [가로, 높이, 세로] (m) */
+  meters?: [number, number, number];
+  confident: boolean;
+}
+
+/**
+ * glTF는 미터가 표준이지만 건축 모델은 mm(Rhino·CAD 관행)로 나오는 일이 흔하다.
+ * 바운딩박스 크기로 단위를 추정한다 — 건물 최대 변을 5~500m로 보고 역산.
+ */
+export function guessUnit(size?: [number, number, number]): UnitGuess {
+  if (!size || !size.every((v) => Number.isFinite(v) && v > 0)) {
+    return { scale: 1, label: "단위 불명 — 미터로 가정", confident: false };
+  }
+  const longest = Math.max(...size);
+  const candidates: { scale: number; label: string }[] = [
+    { scale: 1, label: "미터(m)" },
+    { scale: 0.001, label: "밀리미터(mm)" },
+    { scale: 0.01, label: "센티미터(cm)" },
+    { scale: 0.0254, label: "인치(in)" },
+    { scale: 0.3048, label: "피트(ft)" },
+  ];
+  // 건물 최대 변이 5~500m면 그럴듯하다고 본다
+  const plausible = candidates.filter((c) => {
+    const m = longest * c.scale;
+    return m >= 5 && m <= 500;
+  });
+  const pick = plausible[0] ?? { scale: 1, label: "미터(m)" };
+  return {
+    scale: pick.scale,
+    label: pick.label,
+    meters: size.map((v) => v * pick.scale) as [number, number, number],
+    confident: plausible.length > 0,
   };
 }
 
@@ -38,7 +81,8 @@ const SIZE_WARN = 30;
 interface GltfJson {
   asset?: { generator?: string };
   nodes?: { children?: number[]; mesh?: number }[];
-  meshes?: { primitives?: unknown[] }[];
+  accessors?: { min?: number[]; max?: number[] }[];
+  meshes?: { primitives?: { attributes?: { POSITION?: number } }[] }[];
   materials?: unknown[];
   images?: unknown[];
   scenes?: { nodes?: number[] }[];
@@ -130,12 +174,35 @@ export function inspectGlb(buffer: ArrayBuffer, fileName: string): GlbReport {
         fileMB, nodes: 0, meshes: 0, primitives: 0, materials: 0, images: 0,
         maxDepth: 0, hasCycle: false, extensions: [],
       },
+      unit: guessUnit(),
     };
   }
 
   const nodes = json.nodes ?? [];
   const meshes = json.meshes ?? [];
   const primitives = meshes.reduce((n, m) => n + (m.primitives?.length ?? 0), 0);
+
+  // POSITION accessor의 min/max로 모델 로컬 바운딩박스 (노드 변환은 미적용 — 단위 추정에는 충분)
+  const positionAccessors = new Set<number>();
+  for (const m of meshes) {
+    for (const p of m.primitives ?? []) {
+      if (p.attributes?.POSITION != null) positionAccessors.add(p.attributes.POSITION);
+    }
+  }
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  for (const i of positionAccessors) {
+    const a = json.accessors?.[i];
+    if (!a?.min || !a?.max) continue;
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k], a.min[k]);
+      hi[k] = Math.max(hi[k], a.max[k]);
+    }
+  }
+  const size = lo.every((v) => Number.isFinite(v))
+    ? (hi.map((v, i) => v - lo[i]) as [number, number, number])
+    : undefined;
+  const unit = guessUnit(size);
   const roots = json.scenes?.[json.scene ?? 0]?.nodes ?? nodes.map((_, i) => i);
   const { maxDepth, hasCycle } = analyzeHierarchy(nodes, roots);
   const extensions = json.extensionsUsed ?? [];
@@ -188,6 +255,8 @@ export function inspectGlb(buffer: ArrayBuffer, fileName: string): GlbReport {
       hasCycle,
       extensions,
       generator: json.asset?.generator,
+      size,
     },
+    unit,
   };
 }

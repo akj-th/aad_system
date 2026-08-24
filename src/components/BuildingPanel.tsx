@@ -30,6 +30,7 @@ export default function BuildingPanel() {
   const [modelReport, setModelReport] = useState<GlbReport | null>(null);
   // input.value를 비우면 files가 사라지므로 강제 로드용으로 따로 잡아둔다
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const modelSize = modelReport?.stats.size;
   const [nudgeStep, setNudgeStep] = useState<number>(1);
 
   // 초기값은 지도의 실제 상태에서 읽는다 (패널이 닫혔다 열려도 어긋나지 않게)
@@ -51,9 +52,11 @@ export default function BuildingPanel() {
     if (!/\.(glb|gltf)$/i.test(file.name)) return;
     setModelReport(null);
     setPendingFile(null);
+    let unitScale = 1;
     try {
       const report = inspectGlb(await file.arrayBuffer(), file.name);
       setModelReport(report);
+      unitScale = report.unit.scale;
       if (!report.ok) {
         setPendingFile(file); // 치명적 — 로드하지 않고 강제 로드 선택지만 남긴다
         return;
@@ -61,11 +64,11 @@ export default function BuildingPanel() {
     } catch {
       // 검사 실패는 막지 않는다 (Cesium 쪽 복구 로직이 받아준다)
     }
-    placeFile(file);
+    placeFile(file, unitScale);
   }
 
-  function placeFile(file: File) {
-
+  /** unitScale: 모델 단위를 미터로 바꾸는 배율 (mm 모델이면 0.001) */
+  function placeFile(file: File, unitScale = 1) {
     // 불러온 프로젝트처럼 배치값이 이미 있으면(파일만 없음) 배치를 유지하고 파일만 교체
     if (placement) {
       setBuildingModelUrl(URL.createObjectURL(file));
@@ -96,7 +99,8 @@ export default function BuildingPanel() {
       baseHeight: terrainHeightAt(lon, lat) ?? 0,
       heightOffset: 0,
       heading: 0,
-      scale: 1,
+      // 감지된 모델 단위를 미터로 맞춘다 (Rhino 등 mm 모델이면 0.001)
+      scale: unitScale,
     });
     setTimeout(flyToModel, 600);
   }
@@ -194,6 +198,16 @@ export default function BuildingPanel() {
           {modelReport.warnings.map((m) => (
             <p key={m} className="text-amber-700">⚠ {m}</p>
           ))}
+          {modelReport.unit.meters && (
+            <p className="text-[11px] text-zinc-700">
+              단위 감지: <b>{modelReport.unit.label}</b> → 스케일 ×
+              {modelReport.unit.scale} 적용 (실치수{" "}
+              {modelReport.unit.meters.map((v) => v.toFixed(1)).join(" × ")}m)
+              {!modelReport.unit.confident && (
+                <span className="text-amber-700"> — 확신 낮음, 아래 단위 버튼으로 조정하세요</span>
+              )}
+            </p>
+          )}
           <p className="text-[10px] text-zinc-500">
             노드 {modelReport.stats.nodes.toLocaleString("ko-KR")} · 메시{" "}
             {modelReport.stats.meshes.toLocaleString("ko-KR")} · 조각{" "}
@@ -236,9 +250,10 @@ export default function BuildingPanel() {
                 className="rounded bg-zinc-900 px-2 py-1 text-[11px] text-white"
                 onClick={() => {
                   const f = pendingFile;
+                  const s = modelReport.unit.scale;
                   setModelReport(null);
                   setPendingFile(null);
-                  if (f) placeFile(f);
+                  if (f) placeFile(f, s);
                 }}
               >
                 그래도 올려보기 (지도가 멈출 수 있음)
@@ -338,23 +353,59 @@ export default function BuildingPanel() {
             />
           </label>
 
-          <label className="block">
-            <span className="text-xs text-zinc-500">
-              스케일 ×{placement.scale.toFixed(2)}
-            </span>
+          {/* 스케일 — mm 모델(×0.001)까지 다뤄야 하므로 로그 슬라이더 + 단위 프리셋 */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-zinc-500">
+                스케일 ×
+                {placement.scale < 0.01
+                  ? placement.scale.toPrecision(3)
+                  : placement.scale.toFixed(2)}
+              </span>
+              {modelSize && (
+                <span className="text-[10px] text-zinc-400">
+                  실치수 {modelSize.map((v) => (v * placement.scale).toFixed(1)).join(" × ")}m
+                </span>
+              )}
+            </div>
             <input
               type="range"
-              min={0.1}
-              max={5}
-              step={0.05}
-              value={placement.scale}
+              min={-3}
+              max={1}
+              step={0.01}
+              value={Math.log10(placement.scale)}
               onChange={(e) =>
-                updatePlacement({ scale: Number(e.target.value) })
+                updatePlacement({ scale: 10 ** Number(e.target.value) })
               }
               className="w-full"
               data-testid="scale-slider"
             />
-          </label>
+            <div className="flex items-center gap-1 text-[11px]">
+              <span className="text-zinc-500">모델 단위</span>
+              {(
+                [
+                  ["m", 1],
+                  ["mm", 0.001],
+                  ["cm", 0.01],
+                  ["in", 0.0254],
+                  ["ft", 0.3048],
+                ] as const
+              ).map(([label, s]) => (
+                <button
+                  key={label}
+                  className={`rounded px-1.5 py-0.5 ${
+                    Math.abs(placement.scale - s) < s * 0.01
+                      ? "bg-blue-600 text-white"
+                      : "bg-zinc-100 hover:bg-zinc-200"
+                  }`}
+                  onClick={() => updatePlacement({ scale: s })}
+                  data-testid={`unit-${label}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <button
             className="w-full rounded bg-blue-600 py-1.5 text-white hover:bg-blue-700"
