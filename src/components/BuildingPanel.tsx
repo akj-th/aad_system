@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { centroid } from "@turf/turf";
 import { useProjectStore } from "@/store/project";
+import { inspectGlb, type GlbReport } from "@/lib/model/inspect";
 import {
   cameraCenterLonLat,
   flyToModel,
@@ -26,6 +27,9 @@ export default function BuildingPanel() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [modelReport, setModelReport] = useState<GlbReport | null>(null);
+  // input.value를 비우면 files가 사라지므로 강제 로드용으로 따로 잡아둔다
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [nudgeStep, setNudgeStep] = useState<number>(1);
 
   // 초기값은 지도의 실제 상태에서 읽는다 (패널이 닫혔다 열려도 어긋나지 않게)
@@ -42,8 +46,25 @@ export default function BuildingPanel() {
 
   const placement = massing.placement;
 
-  function loadFile(file: File) {
+  /** 업로드 전 구조 검사 — 치명적이면 막고, 경고는 알린 뒤 진행 */
+  async function loadFile(file: File) {
     if (!/\.(glb|gltf)$/i.test(file.name)) return;
+    setModelReport(null);
+    setPendingFile(null);
+    try {
+      const report = inspectGlb(await file.arrayBuffer(), file.name);
+      setModelReport(report);
+      if (!report.ok) {
+        setPendingFile(file); // 치명적 — 로드하지 않고 강제 로드 선택지만 남긴다
+        return;
+      }
+    } catch {
+      // 검사 실패는 막지 않는다 (Cesium 쪽 복구 로직이 받아준다)
+    }
+    placeFile(file);
+  }
+
+  function placeFile(file: File) {
 
     // 불러온 프로젝트처럼 배치값이 이미 있으면(파일만 없음) 배치를 유지하고 파일만 교체
     if (placement) {
@@ -124,7 +145,7 @@ export default function BuildingPanel() {
           e.preventDefault();
           setDragOver(false);
           const file = e.dataTransfer.files[0];
-          if (file) loadFile(file);
+          if (file) void loadFile(file);
         }}
         data-testid="model-dropzone"
       >
@@ -152,12 +173,59 @@ export default function BuildingPanel() {
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
-            if (file) loadFile(file);
+            if (file) void loadFile(file);
             e.target.value = "";
           }}
           data-testid="model-file-input"
         />
       </div>
+
+      {/* 업로드 전 구조 검사 결과 */}
+      {modelReport && (
+        <div
+          className={`space-y-1 rounded border p-2 text-xs ${
+            modelReport.ok ? "border-zinc-200 bg-zinc-50" : "border-red-300 bg-red-50"
+          }`}
+          data-testid="model-report"
+        >
+          {modelReport.fatal.map((m) => (
+            <p key={m} className="font-medium text-red-700">✕ {m}</p>
+          ))}
+          {modelReport.warnings.map((m) => (
+            <p key={m} className="text-amber-700">⚠ {m}</p>
+          ))}
+          <p className="text-[10px] text-zinc-500">
+            노드 {modelReport.stats.nodes.toLocaleString("ko-KR")} · 메시{" "}
+            {modelReport.stats.meshes.toLocaleString("ko-KR")} · 조각{" "}
+            {modelReport.stats.primitives.toLocaleString("ko-KR")} · 계층{" "}
+            {modelReport.stats.maxDepth}단 · {modelReport.stats.fileMB.toFixed(1)}MB
+            {modelReport.stats.generator && ` · ${modelReport.stats.generator}`}
+          </p>
+          {!modelReport.ok && (
+            <div className="space-y-1 border-t border-red-200 pt-1 text-[11px] text-zinc-700">
+              <p className="font-medium">해결 방법</p>
+              <p>
+                SketchUp: 내보내기 전 모델 전체 선택 → 우클릭 Explode를 몇 차례 반복해
+                중첩 그룹·컴포넌트를 풀거나, 불필요한 그룹을 정리하세요.
+              </p>
+              <p>
+                또는 Blender로 glb를 열어 다시 내보내면 계층이 평탄해집니다 (가장 확실).
+              </p>
+              <button
+                className="rounded bg-zinc-900 px-2 py-1 text-[11px] text-white"
+                onClick={() => {
+                  const f = pendingFile;
+                  setModelReport(null);
+                  setPendingFile(null);
+                  if (f) placeFile(f);
+                }}
+              >
+                그래도 올려보기 (지도가 멈출 수 있음)
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {massing.modelRef && (
         <div className="flex gap-2 text-xs">

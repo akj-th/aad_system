@@ -227,6 +227,27 @@ export function updateBuildingModel(placement: ModelPlacement | undefined) {
   }
 }
 
+/**
+ * 렌더 에러 복구. glb가 Cesium 내부에서 스택 오버플로 등을 내면 렌더 루프가 멈춘다
+ * ("Rendering has stopped"). 모델을 걷어내고 루프를 되살려 지도를 살린다.
+ */
+export function installRenderErrorRecovery(onRecover: (message: string) => void) {
+  const viewer = getViewer();
+  if (!viewer) return () => {};
+  const remove = viewer.scene.renderError.addEventListener((_scene: unknown, error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    // 원인일 가능성이 가장 높은 업로드 모델부터 제거한다
+    const model = viewer.entities.getById(MODEL_ENTITY_ID);
+    if (model) viewer.entities.remove(model);
+    setBuildingModelUrl(null);
+    // 렌더 루프 재개 (Cesium은 에러 후 자동 중단한다)
+    viewer.useDefaultRenderLoop = true;
+    viewer.scene.requestRender();
+    onRecover(message);
+  });
+  return remove;
+}
+
 export function flyToModel() {
   const viewer = getViewer();
   if (!viewer) return;

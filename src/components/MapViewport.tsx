@@ -5,6 +5,7 @@ import { useProjectStore } from "@/store/project";
 import {
   drawMass,
   drawSite,
+  installRenderErrorRecovery,
   registerMap,
   setSun,
   updateBuildingModel,
@@ -17,6 +18,7 @@ const MAP_CONTAINER_ID = "map";
 
 export default function MapViewport() {
   const [scriptMissing, setScriptMissing] = useState(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const site = useProjectStore((s) => s.site);
   const placement = useProjectStore((s) => s.massing.placement);
   const activeMass = useProjectStore((s) =>
@@ -60,6 +62,17 @@ export default function MapViewport() {
     }
   }, []);
 
+  // 렌더 에러(주로 무거운/깨진 glb) 복구 — 모델을 걷어내고 지도를 되살린다
+  useEffect(() => {
+    if (scriptMissing) return;
+    return installRenderErrorRecovery((message) => {
+      useProjectStore.getState().clearModel();
+      setRenderError(
+        `3D 모델을 그리는 중 오류가 발생해 모델을 제거했습니다. 지도는 계속 사용할 수 있습니다.\n${message}`,
+      );
+    });
+  }, [scriptMissing]);
+
   // 필지 선택은 2D 지도(SiteMap2D)에서 한다 — 3D 클릭 선택은 궤도 조작과 충돌해 제거.
 
   // 선택 상태 → 지도 하이라이트 동기화
@@ -96,5 +109,28 @@ export default function MapViewport() {
     );
   }
 
-  return <div id={MAP_CONTAINER_ID} className="h-full w-full" />;
+  return (
+    <div className="relative h-full w-full">
+      <div id={MAP_CONTAINER_ID} className="h-full w-full" />
+      {renderError && (
+        <div
+          className="absolute left-1/2 top-4 z-[60] w-[520px] max-w-[90vw] -translate-x-1/2 rounded-lg border border-red-300 bg-white p-3 shadow-lg"
+          data-testid="render-error-banner"
+        >
+          <p className="text-sm font-semibold text-red-700">3D 모델 렌더 오류</p>
+          <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-600">{renderError}</p>
+          <p className="mt-1 text-[11px] text-zinc-500">
+            SketchUp에서 내보낸 glb는 그룹·컴포넌트 중첩이 깊으면 렌더가 멈출 수 있습니다.
+            내보내기 전에 그룹을 풀거나(Explode) 병합해 다시 시도해 보세요.
+          </p>
+          <button
+            className="mt-2 rounded bg-zinc-900 px-2 py-1 text-xs text-white"
+            onClick={() => setRenderError(null)}
+          >
+            닫기
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
