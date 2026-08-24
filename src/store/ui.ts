@@ -44,6 +44,17 @@ interface UiStore {
   markUpstreamChange(): void;
   lastSiteChangeAt: number;
   markSiteChange(): void;
+
+  // --- 건물 외곽선 직접 그리기 (WP 방식) ---
+  /** 그리는 중인 꼭짓점 (대지 중심 기준 로컬 미터). null = 드로잉 비활성 */
+  footprintDraft: [number, number][] | null;
+  /** 그리드 스냅 모듈(m). 0 = 스냅 없음 */
+  gridModule: number;
+  startDrawing(): void;
+  addVertex(p: [number, number]): void;
+  undoVertex(): void;
+  cancelDrawing(): void;
+  setGridModule(m: number): void;
 }
 
 export const useUiStore = create<UiStore>((set) => ({
@@ -62,4 +73,14 @@ export const useUiStore = create<UiStore>((set) => ({
   markUpstreamChange: () => set({ lastUpstreamChangeAt: Date.now() }),
   lastSiteChangeAt: 0,
   markSiteChange: () => set({ lastSiteChangeAt: Date.now() }),
+
+  footprintDraft: null,
+  gridModule: 1,
+  startDrawing: () => set({ footprintDraft: [] }),
+  addVertex: (p) =>
+    set((s) => ({ footprintDraft: [...(s.footprintDraft ?? []), p] })),
+  undoVertex: () =>
+    set((s) => ({ footprintDraft: (s.footprintDraft ?? []).slice(0, -1) })),
+  cancelDrawing: () => set({ footprintDraft: null }),
+  setGridModule: (gridModule) => set({ gridModule }),
 }));

@@ -3,10 +3,19 @@
 // 매스 스터디 (M4) + 시나리오 비교 (A-4). 규칙 기반 대안 — AI 없음.
 
 import { useProjectStore } from "@/store/project";
+import { useUiStore } from "@/store/ui";
 import { officialSiteArea } from "@/lib/regulation/landinfo";
-import { buildScenario, generateMassAlternatives, type MassParams } from "@/lib/massing/generate";
+import {
+  buildCustomScenario,
+  buildScenario,
+  generateMassAlternatives,
+  type MassParams,
+} from "@/lib/massing/generate";
 import { calcParking } from "@/lib/regulation/parking";
 import { flyToMass } from "@/lib/map/controller";
+import { makeFrame, ringArea, ringToGeometry } from "@/lib/map/draw";
+import { setView2D } from "@/lib/map/map2d";
+import { centroid } from "@turf/turf";
 
 function fmt(n: number, d = 0): string {
   return n.toLocaleString("ko-KR", { maximumFractionDigits: d });
@@ -21,6 +30,14 @@ export default function MassPanel() {
   const setScenarios = useProjectStore((s) => s.setScenarios);
   const updateScenario = useProjectStore((s) => s.updateScenario);
   const setActiveScenario = useProjectStore((s) => s.setActiveScenario);
+  const addScenario = useProjectStore((s) => s.addScenario);
+
+  const draft = useUiStore((s) => s.footprintDraft);
+  const gridModule = useUiStore((s) => s.gridModule);
+  const startDrawing = useUiStore((s) => s.startDrawing);
+  const undoVertex = useUiStore((s) => s.undoVertex);
+  const cancelDrawing = useUiStore((s) => s.cancelDrawing);
+  const setGridModule = useUiStore((s) => s.setGridModule);
 
   const { area: siteArea } = officialSiteArea(site.parcels);
   const ready = !!site.boundary && regulation.bcr.applied > 0;
@@ -44,9 +61,33 @@ export default function MassPanel() {
         ).legal
       : null;
 
+  // 그리는 중인 외곽선의 실시간 지표
+  const draftArea = draft && draft.length >= 3 ? ringArea(draft) : 0;
+  const maxBuildingArea = (siteArea * regulation.bcr.applied) / 100;
+  const draftBcr = siteArea > 0 ? (draftArea / siteArea) * 100 : 0;
+  const draftOverBcr = draftArea > maxBuildingArea + 0.5;
+
   function regenerate() {
     if (!params) return;
     setScenarios(generateMassAlternatives(params));
+  }
+
+  /** 드로잉 시작 — 2D 지도를 대지 중심으로 맞춰 바로 그릴 수 있게 한다 */
+  function beginDrawing() {
+    if (site.boundary) {
+      const c = centroid({ type: "Feature", properties: {}, geometry: site.boundary })
+        .geometry.coordinates;
+      setView2D(c[0], c[1], 19);
+    }
+    startDrawing();
+  }
+
+  function finishDrawing() {
+    if (!params || !draft || draft.length < 3 || !site.boundary) return;
+    const geometry = ringToGeometry(makeFrame(site.boundary), draft);
+    addScenario(buildCustomScenario(params, geometry));
+    cancelDrawing();
+    setTimeout(flyToMass, 500);
   }
 
   function changeRatio(id: string, ratio: number) {
@@ -70,6 +111,83 @@ export default function MassPanel() {
           {massing.scenarios.length ? "대안 다시 생성" : "대안 3개 생성"}
         </button>
       </div>
+
+      {/* 직접 그리기 (WP 방식) — 축척 근사가 아닌 실제 지오메트리 */}
+      {ready && (
+        <div className="space-y-2 rounded border border-zinc-200 p-2" data-testid="draw-controls">
+          {draft === null ? (
+            <button
+              className="w-full rounded bg-zinc-900 py-1.5 text-xs font-medium text-white hover:bg-zinc-700"
+              onClick={beginDrawing}
+              data-testid="draw-start"
+            >
+              ✏ 건물 외곽선 직접 그리기
+            </button>
+          ) : (
+            <>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-zinc-700">외곽선 그리는 중</span>
+                <span className="text-zinc-400">{draft.length}점</span>
+              </div>
+              <div className="flex items-center gap-1 text-[11px]">
+                <span className="text-zinc-500">스냅</span>
+                {[0, 1, 3, 10].map((m) => (
+                  <button
+                    key={m}
+                    className={`rounded px-1.5 py-0.5 ${gridModule === m ? "bg-blue-600 text-white" : "bg-zinc-100 hover:bg-zinc-200"}`}
+                    onClick={() => setGridModule(m)}
+                    data-testid={`grid-${m}`}
+                  >
+                    {m === 0 ? "없음" : `${m}m`}
+                  </button>
+                ))}
+              </div>
+              {draft.length >= 3 && (
+                <div className="rounded bg-blue-50 p-2 text-xs" data-testid="draw-metrics">
+                  <p>
+                    건축면적 <strong>{fmt(draftArea, 1)}㎡</strong> · 건폐율{" "}
+                    <strong className={draftOverBcr ? "text-red-600" : ""}>
+                      {fmt(draftBcr, 1)}%
+                    </strong>
+                    <span className="text-zinc-400"> / 법정 {regulation.bcr.applied}%</span>
+                  </p>
+                  {draftOverBcr && (
+                    <p className="text-[10px] text-red-600">
+                      최대 건축면적 {fmt(maxBuildingArea, 0)}㎡ 초과
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-1 text-xs">
+                <button
+                  className="flex-1 rounded bg-zinc-100 py-1 hover:bg-zinc-200 disabled:opacity-40"
+                  onClick={undoVertex}
+                  disabled={draft.length === 0}
+                >
+                  ← 취소
+                </button>
+                <button
+                  className="flex-1 rounded bg-zinc-100 py-1 hover:bg-zinc-200"
+                  onClick={cancelDrawing}
+                >
+                  중단
+                </button>
+                <button
+                  className="flex-[2] rounded bg-violet-600 py-1 font-medium text-white hover:bg-violet-700 disabled:opacity-40"
+                  onClick={finishDrawing}
+                  disabled={draft.length < 3}
+                  data-testid="draw-finish"
+                >
+                  매스로 확정
+                </button>
+              </div>
+              <p className="text-[10px] text-zinc-400">
+                지도를 클릭해 꼭짓점을 찍으세요. 꼭짓점마다 첫 점 기준 상대좌표(WP)가 표시됩니다.
+              </p>
+            </>
+          )}
+        </div>
+      )}
 
       {!ready ? (
         <p className="text-xs text-zinc-400">대지 경계와 법규(건폐율·용적률)가 있어야 생성됩니다</p>

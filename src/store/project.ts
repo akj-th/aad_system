@@ -164,6 +164,8 @@ interface ProjectStore {
 
   /** 매스 대안 (A-4 시나리오). 활성화하면 program.grossArea를 대안 연면적으로 맞춘다 */
   setScenarios(scenarios: MassScenario[]): void;
+  /** 대안 하나를 추가하고 바로 활성화 (직접 그린 매스) */
+  addScenario(scenario: MassScenario): void;
   updateScenario(id: string, patch: Partial<MassScenario>): void;
   setActiveScenario(id: string | null): void;
   setFloorTable(table: FloorArea[]): void;
@@ -276,6 +278,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set((s) => ({
         massing: { ...s.massing, scenarios, floorTable: [] },
         meta: { ...s.meta, activeScenarioId: null },
+      })),
+    addScenario: (scenario) =>
+      set((s) => ({
+        massing: { ...s.massing, scenarios: [scenario, ...s.massing.scenarios], floorTable: [] },
+        meta: { ...s.meta, activeScenarioId: scenario.id },
+        program: { ...s.program, grossArea: Math.round(scenario.grossFloorArea) },
       })),
     updateScenario: (id, patch) =>
       set((s) => ({

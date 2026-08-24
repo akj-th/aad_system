@@ -37,6 +37,7 @@ export default function ExpansionOverlay() {
   const setMapLayer = useUiStore((s) => s.setMapLayer);
   const setViewportThumb = useUiStore((s) => s.setViewportThumb);
   const captures = useProjectStore((s) => s.captures);
+  const drawing = useUiStore((s) => s.footprintDraft !== null);
 
   const open = expandedNode !== null;
 
@@ -85,7 +86,13 @@ export default function ExpansionOverlay() {
       {/* 대지 노드: 필지 선택은 2D 지도로 (3D 지도 위, 도구 카드 아래) */}
       {expandedKind === "site" && (
         <div className="fixed inset-0 z-[45]">
-          <SiteMap2D />
+          <SiteMap2D mode="parcel" />
+        </div>
+      )}
+      {/* 매스: 외곽선을 그리는 동안에만 2D 지도를 띄운다 (그 외에는 3D 매스 확인) */}
+      {expandedKind === "mass" && drawing && (
+        <div className="fixed inset-0 z-[45]">
+          <SiteMap2D mode="footprint" />
         </div>
       )}
       <aside

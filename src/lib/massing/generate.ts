@@ -80,6 +80,60 @@ export function buildScenario(
   };
 }
 
+/**
+ * 직접 그린 외곽선으로 대안을 만든다 (WP 방식).
+ * 축척 근사가 아니라 사용자가 지정한 실제 지오메트리를 그대로 쓴다.
+ */
+export function buildCustomScenario(
+  p: MassParams,
+  footprint: SiteGeometry,
+  name = "직접 그린 매스",
+): MassScenario {
+  const footprintFeature = toFeature(footprint);
+  const footprintArea = turfArea(footprintFeature);
+  const maxGross = (p.siteArea * p.far) / 100;
+  const maxBuildingArea = (p.siteArea * p.bcr) / 100;
+  const floors = Math.max(1, Math.ceil(maxGross / Math.max(1, footprintArea)));
+  const height = floors * p.floorHeight;
+
+  const sun = checkSunlight(p.useZone, height, p.boundary);
+  const [, fMinLat, , fMaxLat] = bbox(footprintFeature);
+  const footprintDepth = (fMaxLat - fMinLat) * 111_320;
+  const northSlack = sun.siteDepthNS !== null ? (sun.siteDepthNS - footprintDepth) / 2 : null;
+  const sunlightOk = !sun.applies || (northSlack !== null && northSlack >= sun.requiredSetback);
+
+  const notes: string[] = ["사용자가 직접 그린 외곽선 (지오메트리 그대로 사용)"];
+  if (footprintArea > maxBuildingArea + 0.5) {
+    notes.push(
+      `⚠ 건폐율 초과 — 최대 건축면적 ${maxBuildingArea.toFixed(0)}㎡ 대비 ${(footprintArea - maxBuildingArea).toFixed(0)}㎡ 초과`,
+    );
+  }
+  if (sun.applies) {
+    notes.push(
+      `정북일조 필요 이격 ${sun.requiredSetback.toFixed(1)}m vs 북측 여유 ${(northSlack ?? 0).toFixed(1)}m → ${sunlightOk ? "통과(개략)" : "부족"}`,
+    );
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    name,
+    description: "2D 지도에서 직접 그린 건물 외곽선",
+    floors,
+    floorHeight: p.floorHeight,
+    grossFloorArea: maxGross,
+    bcr: (footprintArea / p.siteArea) * 100,
+    far: p.far,
+    createdAt: new Date().toISOString(),
+    footprint,
+    footprintArea,
+    footprintRatio: footprintArea / Math.max(1, maxBuildingArea),
+    height,
+    sunlightOk,
+    sunlightSetback: sun.applies ? sun.requiredSetback : 0,
+    notes,
+  };
+}
+
 export function generateMassAlternatives(p: MassParams): MassScenario[] {
   return PRESETS.map((preset) => buildScenario(p, preset.ratio, preset.name, preset.description));
 }
