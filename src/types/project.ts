@@ -63,6 +63,32 @@ interface Parcel {
   officialArea?: number
   /** 필지별 용도지역 (토지특성 API) */
   useZone?: string
+  /** 도로접면 (예: 광대소각) — 접도 조건 */
+  roadSide?: string
+  /** 지형고저 (예: 평지) */
+  terrain?: string
+  /** 토지형상 (예: 사다리형) */
+  shape?: string
+  /** 이용상황 (예: 상업기타) */
+  useSituation?: string
+}
+
+/** 기존 건축물 개요 (건축물대장). 신축 시 철거 대상 판단·현황 파악용 */
+interface ExistingBuilding {
+  pnu: string
+  name: string
+  mainUse: string
+  detailUse: string
+  structure: string
+  totalArea: number | null
+  buildingArea: number | null
+  groundFloors: number | null
+  basementFloors: number | null
+  height: number | null
+  bcr: number | null
+  far: number | null
+  approvedAt: string | null
+  registerType: string
 }
 
 interface RoadFrontage {
@@ -86,6 +112,8 @@ interface SiteState {
   roads: RoadFrontage[]
   slope: SlopeInfo
   notes: string
+  /** 기존 건축물대장 (선택 필지 전체) */
+  existingBuildings?: ExistingBuilding[]
 }
 
 // --- regulation (M2) ---------------------------------------------------------
@@ -354,6 +382,7 @@ export type {
   ProvenanceSource,
   ProvenanceEntry,
   Parcel,
+  ExistingBuilding,
   RoadFrontage,
   SlopeInfo,
   SiteState,

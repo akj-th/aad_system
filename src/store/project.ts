@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { area as turfArea, union, featureCollection } from "@turf/turf";
 import type { Feature, Polygon, MultiPolygon } from "geojson";
 import type {
+  ExistingBuilding,
   FeasibilityState,
   FloorArea,
   MassingState,
@@ -142,8 +143,11 @@ interface ProjectStore {
 
   /** 법규 자동 조회 결과 반영. provenance 기록 포함 */
   setRegulation(patch: Partial<RegulationState>, provenance: ProvenanceEntry[]): void;
-  /** 토지특성 조회로 얻은 필지별 공부면적·용도지역 병합 */
-  mergeParcelLandInfo(byPnu: Record<string, { officialArea?: number; useZone?: string }>): void;
+  /** 토지특성 조회로 얻은 필지별 속성 병합 (+ 기존 건축물대장) */
+  mergeParcelLandInfo(
+    byPnu: Record<string, Partial<Parcel>>,
+    existingBuildings?: ExistingBuilding[],
+  ): void;
 
   updateProgram(patch: Partial<ProgramState>): void;
   updateFeasibility(patch: Partial<FeasibilityState>): void;
@@ -201,13 +205,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         regulation: { ...s.regulation, ...patch },
         provenance: [...s.provenance, ...provenance],
       })),
-    mergeParcelLandInfo: (byPnu) =>
+    mergeParcelLandInfo: (byPnu, existingBuildings) =>
       set((s) => ({
         site: {
           ...s.site,
           parcels: s.site.parcels.map((p) =>
             byPnu[p.pnu] ? { ...p, ...byPnu[p.pnu] } : p,
           ),
+          existingBuildings: existingBuildings ?? s.site.existingBuildings,
         },
       })),
 

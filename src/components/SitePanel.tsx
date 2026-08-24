@@ -10,6 +10,7 @@ import {
   setLabelsVisible,
 } from "@/lib/map/controller";
 import { setView2D } from "@/lib/map/map2d";
+import { eumLandUrl } from "@/lib/regulation/landinfo";
 import type { SearchResultItem } from "@/app/api/vworld/search/route";
 
 const CONTOUR_SPACINGS = [1, 5, 10] as const;
@@ -36,6 +37,13 @@ export default function SitePanel() {
     () => getContourState().spacing,
   );
   const [labelsOn, setLabelsOn] = useState(() => getLabelsVisible());
+
+  // 대표 필지 = 면적 최대 (토지특성 표시 기준)
+  const rep = site.parcels.reduce<(typeof site.parcels)[number] | undefined>(
+    (best, p) =>
+      !best || (p.officialArea ?? p.area) > (best.officialArea ?? best.area) ? p : best,
+    undefined,
+  );
 
   async function runSearch() {
     const q = query.trim();
@@ -180,6 +188,91 @@ export default function SitePanel() {
               ? `합필 ${site.parcels.length}필지 (geometry union)`
               : "단필"}
             {" · 도형 기준 면적으로 지적공부와 다를 수 있음"}
+          </p>
+        </section>
+      )}
+
+      {/* 토지특성 — 토지특성 API에서 함께 오는 대지 조건 */}
+      {rep && (rep.roadSide || rep.terrain || rep.shape) && (
+        <section className="space-y-1" data-testid="land-characteristics">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-zinc-700">토지특성</h2>
+            <a
+              href={eumLandUrl(rep.pnu)}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] text-blue-600 hover:underline"
+              data-testid="eum-link"
+            >
+              토지이음에서 확인 ↗
+            </a>
+          </div>
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            {(
+              [
+                ["도로접면", rep.roadSide],
+                ["지형고저", rep.terrain],
+                ["토지형상", rep.shape],
+                ["이용상황", rep.useSituation],
+              ] as const
+            )
+              .filter(([, v]) => v)
+              .map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-2">
+                  <dt className="text-zinc-500">{k}</dt>
+                  <dd className="truncate font-medium text-zinc-700">{v}</dd>
+                </div>
+              ))}
+          </dl>
+          <p className="text-[10px] text-zinc-400">
+            토지특성 API (개별공시지가 조사자료) — 접도 폭·경사는 별도 실측 필요
+          </p>
+        </section>
+      )}
+
+      {/* 기존 건축물 (건축물대장) */}
+      {site.existingBuildings && site.existingBuildings.length > 0 && (
+        <section className="space-y-1" data-testid="existing-buildings">
+          <h2 className="font-semibold text-zinc-700">
+            기존 건축물{" "}
+            <span className="font-normal text-zinc-400">
+              {site.existingBuildings.length}동
+            </span>
+          </h2>
+          <ul className="space-y-1">
+            {site.existingBuildings.map((b, i) => (
+              <li key={i} className="rounded bg-zinc-50 p-2 text-xs">
+                <p className="font-medium text-zinc-700">
+                  {b.name || b.mainUse || "건축물"}
+                  {b.detailUse && b.detailUse !== b.mainUse && (
+                    <span className="font-normal text-zinc-500"> · {b.detailUse}</span>
+                  )}
+                </p>
+                <p className="text-[11px] text-zinc-500">
+                  {[
+                    b.structure,
+                    b.groundFloors != null && `지상 ${b.groundFloors}층`,
+                    b.basementFloors ? `지하 ${b.basementFloors}층` : null,
+                    b.height != null && `H ${b.height}m`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+                <p className="text-[11px] text-zinc-500">
+                  연면적 {b.totalArea?.toLocaleString("ko-KR") ?? "—"}㎡ · 건축면적{" "}
+                  {b.buildingArea?.toLocaleString("ko-KR") ?? "—"}㎡
+                  {b.bcr != null && ` · 건폐율 ${b.bcr}%`}
+                  {b.far != null && ` · 용적률 ${b.far}%`}
+                </p>
+                <p className="text-[10px] text-zinc-400">
+                  {b.approvedAt ? `사용승인 ${b.approvedAt}` : "사용승인일 미상"} ·{" "}
+                  {b.registerType || "건축물대장"}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[10px] text-zinc-400">
+            신축 검토 시 철거 대상 — 대장 기재값이며 현황과 다를 수 있음
           </p>
         </section>
       )}

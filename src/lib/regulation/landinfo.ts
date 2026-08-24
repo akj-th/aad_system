@@ -1,10 +1,27 @@
 // 대지 선택 시 토지특성·토지이용계획을 자동 조회해 ProjectState.regulation에
 // 반영하는 클라이언트 헬퍼. 판단·계산은 lookupZoneLimits/calcAreas(결정론)가 한다.
 
-import type { Parcel, ProvenanceEntry } from "@/types/project";
+import type { DocRef, ExistingBuilding, Parcel, ProvenanceEntry } from "@/types/project";
 import type { LandInfo } from "@/app/api/vworld/landinfo/route";
 import { useProjectStore } from "@/store/project";
 import { lookupZoneLimits } from "./calc";
+
+/** 토지이음 필지 상세 (용도지역·지구, 지구단위계획 지침 원문 확인) */
+export function eumLandUrl(pnu: string): string {
+  return `https://www.eum.go.kr/web/ar/lu/luLandDet.jsp?pnu=${pnu}`;
+}
+
+/** 국가법령정보센터 자치법규 검색 (해당 지자체 도시계획 조례) */
+export function localOrdinanceUrl(addr: string): string {
+  const sido = addr.split(" ")[0] ?? "";
+  return `https://www.law.go.kr/ordinSc.do?menuId=3&query=${encodeURIComponent(`${sido} 도시계획 조례`)}`;
+}
+
+/** 지자체 고시·공고 검색 (지구단위계획 결정 고시 원문) */
+export function noticeSearchUrl(addr: string, district: string): string {
+  const sido = addr.split(" ")[0] ?? "";
+  return `https://www.google.com/search?q=${encodeURIComponent(`${sido} ${district} 지구단위계획 결정 고시`)}`;
+}
 
 async function fetchLandInfo(pnu: string): Promise<LandInfo | null> {
   try {
@@ -28,13 +45,22 @@ export async function refreshRegulation(parcels: Parcel[]): Promise<void> {
   const infos = await Promise.all(parcels.map((p) => fetchLandInfo(p.pnu)));
   const now = new Date().toISOString();
 
-  const byPnu: Record<string, { officialArea?: number; useZone?: string }> = {};
+  const byPnu: Record<string, Partial<Parcel>> = {};
+  const existingBuildings: ExistingBuilding[] = [];
   infos.forEach((info) => {
-    if (info) {
-      byPnu[info.pnu] = {
-        officialArea: info.officialArea ?? undefined,
-        useZone: info.useZone ?? undefined,
-      };
+    if (!info) return;
+    byPnu[info.pnu] = {
+      officialArea: info.officialArea ?? undefined,
+      useZone: info.useZone ?? undefined,
+      roadSide: info.roadSide ?? undefined,
+      terrain: info.terrain ?? undefined,
+      shape: info.shape ?? undefined,
+      useSituation: info.useSituation ?? undefined,
+      // 연속지적도 jiga가 없으면 토지특성 공시지가로 보완
+      ...(info.jiga != null ? { jiga: info.jiga } : {}),
+    };
+    for (const b of info.buildings) {
+      existingBuildings.push({ ...b, pnu: info.pnu });
     }
   });
 
@@ -96,11 +122,30 @@ export async function refreshRegulation(parcels: Parcel[]): Promise<void> {
     }
   });
 
-  mergeParcelLandInfo(byPnu);
+  // 지구단위계획 등 지침 원문 확인이 필요한 구역 — 해석하지 않고 링크로 연결한다
+  const planningDistricts = [
+    ...new Set(infos.flatMap((info) => info?.planningDistricts ?? [])),
+  ];
+  const documentRefs: DocRef[] = planningDistricts.length
+    ? [
+        { title: "토지이음 — 필지 토지이용계획 확인", url: eumLandUrl(rep.parcel.pnu) },
+        ...planningDistricts.map((d) => ({
+          title: `${d} 결정 고시 검색`,
+          url: noticeSearchUrl(addr, d),
+        })),
+      ]
+    : [];
+
+  mergeParcelLandInfo(byPnu, existingBuildings);
   setRegulation(
     {
       useZone,
       useDistrict,
+      dpUnitPlan: {
+        applies: planningDistricts.length > 0,
+        documentRefs,
+        conditions: [],
+      },
       bcr: {
         legal: limits?.legal?.bcr.value ?? 0,
         applied: limits?.applied?.bcr.value ?? 0,

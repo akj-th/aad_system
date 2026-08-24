@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useProjectStore } from "@/store/project";
 import { calcAreas } from "@/lib/regulation/calc";
-import { officialSiteArea, refreshRegulation } from "@/lib/regulation/landinfo";
+import {
+  localOrdinanceUrl,
+  officialSiteArea,
+  refreshRegulation,
+} from "@/lib/regulation/landinfo";
 import { checkSunlight } from "@/lib/regulation/sunlight";
 
 function fmt(n: number, digits = 1): string {
@@ -22,6 +26,7 @@ export default function RegulationPanel() {
   const [heightOverride, setHeightOverride] = useState<number | null>(null);
 
   const hasParcels = site.parcels.length > 0;
+  const addr = site.parcels[0]?.addr ?? "";
   const { area: baseArea, allOfficial } = officialSiteArea(site.parcels);
   const ready = hasParcels && regulation.useZone && regulation.bcr.applied > 0;
   const result = ready
@@ -80,6 +85,35 @@ export default function RegulationPanel() {
                 </span>
               )}
             </p>
+            {/* 지구단위계획 등 — 지침은 해석하지 않고 원문 확인을 요구한다 (A-6 최대 난관) */}
+            {regulation.dpUnitPlan.applies && (
+              <div
+                className="space-y-1 rounded bg-zinc-900 p-2.5 text-white"
+                data-testid="dp-unit-plan"
+              >
+                <p className="text-[11px] font-semibold text-amber-300">
+                  ⚠ 지침 원문 확인 필수
+                </p>
+                <p className="text-xs">
+                  이 대지에는 지구단위계획 등 별도 지침이 적용됩니다. 지침의
+                  건축한계선·높이·용도 제한은 <strong>아래 계산에 반영되지 않습니다</strong>.
+                </p>
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {regulation.dpUnitPlan.documentRefs.map((d) => (
+                    <a
+                      key={d.title}
+                      href={d.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded bg-white/15 px-2 py-1 text-[11px] hover:bg-white/25"
+                    >
+                      {d.title} ↗
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {regulation.useDistrict.length > 0 && (
               <details className="text-[11px] text-zinc-500">
                 <summary className="cursor-pointer">
@@ -135,6 +169,19 @@ export default function RegulationPanel() {
             <p className="text-[10px] leading-relaxed text-zinc-400">
               근거: 건폐율 — {regulation.basis.bcr} · 용적률 —{" "}
               {regulation.basis.far}
+              {addr && (
+                <>
+                  {" · "}
+                  <a
+                    href={localOrdinanceUrl(addr)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    조례 원문 ↗
+                  </a>
+                </>
+              )}
             </p>
           )}
 
