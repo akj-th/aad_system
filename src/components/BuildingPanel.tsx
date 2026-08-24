@@ -214,10 +214,24 @@ export default function BuildingPanel() {
                 조각을 병합하고 형태는 그대로 둡니다(단순화·압축 없음). 같은 폴더에
                 -optimized.glb가 생깁니다.
               </p>
-              <p>
-                Blender를 쓴다면: 전체 선택(A) → 병합(Ctrl+J) → glb 재내보내기.
-                SketchUp에서는 재질 수를 줄이고 불필요한 그룹·컴포넌트를 정리한 뒤 내보내세요.
-              </p>
+              <details>
+                <summary className="cursor-pointer text-zinc-600">
+                  모델링 툴에서 미리 줄이려면
+                </summary>
+                <div className="mt-1 space-y-1">
+                  <p>
+                    <b>Rhino</b>: 내보내기 전 <code>SelAll</code> → <code>Mesh</code>(메시 변환)
+                    → 재질(레이어)별로 선택해 <code>Join</code>. 폴리서피스를 그대로 내보내면
+                    면마다 조각이 생깁니다. glTF 내보내기 옵션에서 Draco 압축은 끄세요.
+                  </p>
+                  <p>
+                    <b>Blender</b>: 전체 선택(A) → 병합(Ctrl+J) → glb 재내보내기.
+                  </p>
+                  <p>
+                    <b>SketchUp</b>: 재질 수를 줄이고 불필요한 그룹·컴포넌트를 정리 후 내보내기.
+                  </p>
+                </div>
+              </details>
               <button
                 className="rounded bg-zinc-900 px-2 py-1 text-[11px] text-white"
                 onClick={() => {

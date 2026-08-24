@@ -68,6 +68,9 @@ execFileSync(
     // 브이월드 Cesium 호환성 우선: draco 압축·GPU 인스턴싱 확장 사용 안 함
     "--compress", "false",
     "--instance", "false",
+    // 텍스처는 건드리지 않는다 — 특이한 색공간의 이미지에서 인코더가 실패하고,
+    // 우리에게 중요한 건 지오메트리 병합이다
+    "--texture-compress", "false",
   ],
   { stdio: "inherit", cwd: process.cwd() },
 );
