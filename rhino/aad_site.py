@@ -29,6 +29,10 @@ import Rhino
 import rhinoscriptsyntax as rs
 import scriptcontext as sc
 import System
+import clr
+
+clr.AddReference("System.IO.Compression.FileSystem")
+from System.IO.Compression import ZipFile
 from System.Net import WebClient
 from System.Drawing import Bitmap, Graphics, Rectangle
 
@@ -39,20 +43,23 @@ SERVER = os.environ.get("AAD_SERVER", "http://localhost:3000")
 #   grid  = 지형 메시 한 변 정점 수 (129 → 16,641 정점 / 32,768 삼각형)
 #   zoom  = 항공사진 타일 줌 (z18 ≈ 0.47m/px, z16 ≈ 1.9m/px)
 WIDE_OPTIONS = [
-    {"label": u"0.5km — 대상지 주변만", "radius": 500, "grid": 129, "zoom": 18},
     {"label": u"1km — 가로 구역", "radius": 1000, "grid": 161, "zoom": 17},
-    {"label": u"2km — 근린 생활권", "radius": 2000, "grid": 193, "zoom": 16},
-    {"label": u"3km — 광역 조감", "radius": 3000, "grid": 225, "zoom": 15},
-    {"label": u"5km — 도시 스케일", "radius": 5000, "grid": 257, "zoom": 14},
+    {"label": u"2.5km — 근린 생활권", "radius": 2500, "grid": 193, "zoom": 16},
+    {"label": u"5km — 도시 스케일 (기본)", "radius": 5000, "grid": 257, "zoom": 14},
+    {"label": u"10km — 광역 조감", "radius": 10000, "grid": 289, "zoom": 13},
+    {"label": u"25km — 도시권", "radius": 25000, "grid": 337, "zoom": 11},
+    {"label": u"50km — 수도권 스케일", "radius": 50000, "grid": 385, "zoom": 10},
 ]
+DEFAULT_WIDE = 2  # 5km
 
 # 코어: 대상지 주변 최고 해상도 구간. 지형·항공사진·필지선·건물이 여기 들어간다.
 CORE_OPTIONS = [
     {"label": u"100m — 대상지만", "radius": 100, "grid": 129, "zoom": 20},
     {"label": u"200m", "radius": 200, "grid": 161, "zoom": 20},
     {"label": u"300m", "radius": 300, "grid": 193, "zoom": 19},
-    {"label": u"500m (권장)", "radius": 500, "grid": 225, "zoom": 19},
+    {"label": u"500m (기본)", "radius": 500, "grid": 225, "zoom": 19},
 ]
+DEFAULT_CORE = 3  # 500m
 
 MAX_TILES = 240
 LAYERS = {
@@ -386,8 +393,88 @@ def add_parcels(features, frame, target_pnu, core_radius, terrain=None):
     return made, neighbors, skipped
 
 
+def add_buildings3d(frame, radius, detail, max_tiles=40):
+    """
+    브이월드 3D 건물(b3dm)을 그대로 가져온다 — 텍스처가 입혀진 실제 형상이다.
+
+    서버가 타일을 받아 대지 중심 로컬 좌표로 옮긴 뒤 .3dm + 텍스처 zip 으로 준다.
+    Rhino 7 은 glTF 가져오기를 지원하지 않고, OBJ 가져오기는 스크립트로 억제할 수 없는
+    모달 대화상자를 띄운다 — 네이티브 3dm 이라야 조용히 들어온다.
+    """
+    west, south, east, north = frame.bbox(radius)
+    url = (
+        "%s/api/vworld/buildings3d?bbox=%f,%f,%f,%f&lon=%f&lat=%f&detail=%d&maxTiles=%d&format=3dm"
+        % (SERVER, west, south, east, north, frame.lon0, frame.lat0, detail, max_tiles)
+    )
+    stamp = System.Environment.TickCount
+    zip_path = os.path.join(tempfile.gettempdir(), "aad_bldg_%d.zip" % stamp)
+    out_dir = os.path.join(tempfile.gettempdir(), "aad_bldg_%d" % stamp)
+
+    client = WebClient()
+    try:
+        client.DownloadFile(url, zip_path)
+    except Exception as e:
+        client.Dispose()
+        return 0, u"내려받기 실패 (%s)" % e
+    client.Dispose()
+
+    if os.path.getsize(zip_path) < 2000:  # 오류 JSON
+        return 0, u"3D 건물 데이터 없음"
+
+    try:
+        ZipFile.ExtractToDirectory(zip_path, out_dir)
+    except Exception as e:
+        return 0, u"압축 해제 실패 (%s)" % e
+
+    model_path = None
+    for name in os.listdir(out_dir):
+        if name.lower().endswith(".3dm"):
+            model_path = os.path.join(out_dir, name)
+            break
+    if not model_path:
+        return 0, u"3dm 파일 없음"
+
+    # _-Import 는 3dm·OBJ 모두 모달 대화상자를 띄워 스크립트가 멈춘다.
+    # RhinoCommon 으로 직접 읽어 문서에 넣는다.
+    try:
+        source = Rhino.FileIO.File3dm.Read(model_path)
+    except Exception as e:
+        return 0, u"3dm 읽기 실패 (%s)" % e
+    if source is None:
+        return 0, u"3dm 을 열 수 없음"
+
+    layer_index = sc.doc.Layers.FindByFullPath(LAYERS["buildings"], -1)
+    # 재질을 먼저 문서에 등록하고 인덱스를 다시 매핑한다 (텍스처 경로 유지)
+    # File3dmMaterialTable 은 인덱서를 노출하지 않아 순회로 다룬다
+    material_map = {}
+    for i, material in enumerate(source.AllMaterials):
+        # 텍스처 파일은 3dm 옆에 풀려 있으므로 절대경로로 바꿔 준다
+        try:
+            bitmap = material.GetBitmapTexture()
+            if bitmap and bitmap.FileName and not os.path.isabs(bitmap.FileName):
+                bitmap.FileName = os.path.join(out_dir, os.path.basename(bitmap.FileName))
+                material.SetBitmapTexture(bitmap)
+        except Exception:
+            pass
+        material_map[i] = sc.doc.Materials.Add(material)
+
+    count = 0
+    for obj in source.Objects:
+        geometry = obj.Geometry
+        attributes = obj.Attributes.Duplicate()
+        if attributes.MaterialIndex in material_map:
+            attributes.MaterialIndex = material_map[attributes.MaterialIndex]
+            attributes.MaterialSource = Rhino.DocObjects.ObjectMaterialSource.MaterialFromObject
+        if layer_index >= 0:
+            attributes.LayerIndex = layer_index
+        if sc.doc.Objects.Add(geometry, attributes) != System.Guid.Empty:
+            count += 1
+    source.Dispose()
+    return count, u"%d개 객체 · %.1fMB" % (count, os.path.getsize(zip_path) / 1048576.0)
+
+
 def add_buildings(features, frame, target_pnu, core_radius, terrain=None):
-    """코어 범위 필지의 건축물대장 높이로 매스를 세운다 (지형 고도 위에서 압출)"""
+    """(대체 경로) 건축물대장 높이로 매스를 세운다 — 3D 건물 데이터가 없는 지역용"""
     candidates = []
     for f in features:
         props = f.get("properties", {})
@@ -604,10 +691,15 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False):
         )
         notes.append(u"필지: 대상 1 + 인접 %d (폴리라인 %d)" % (neighbors, made))
 
-        built, tried = add_buildings(
-            features, frame, target_pnu, core["radius"], core_terrain
-        )
-        notes.append(u"주변건물: %d동 (후보 %d)" % (built, tried))
+        # 주변 건물 — 브이월드 3D 객체를 우선 쓰고, 없는 지역이면 대장 높이로 압출한다
+        count, bnote = add_buildings3d(frame, core["radius"], detail=5)
+        if count:
+            notes.append(u"주변건물(3D 실물): " + bnote)
+        else:
+            built, tried = add_buildings(
+                features, frame, target_pnu, core["radius"], core_terrain
+            )
+            notes.append(u"주변건물(대장 압출): %d동 — %s" % (built, bnote))
 
         # 대지 정보
         info = [u"AAD 대지 컨텍스트", picked.get("title", address)]
