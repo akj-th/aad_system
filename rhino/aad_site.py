@@ -157,9 +157,14 @@ DEFAULT_CORE = 3  # 500m
 
 MAX_TILES = 240
 
-# 3D 건물 타일 상한. 실측: 반경 500m = 106장 · 5초 · 정점 195,538.
-# 상한에 걸리면 건물이 잘린 채로 들어오므로 넉넉히 둔다.
-BUILDING_TILE_CAP = 400
+# 3D 건물 타일 상한. 상한에 걸리면 건물이 잘린 채로 들어오므로 넉넉히 둔다.
+# 실측(반경 500m): detail=0 → 239장 · 11초 · 381동 · 정점 165,526
+BUILDING_TILE_CAP = 600
+
+# 건물 LOD 목표. 이 값보다 큰 geometricError 노드는 자식으로 내려간다.
+# 5 로 두면 중간 LOD 에서 멈춰 큰 건물만 들어온다 (실측 105동).
+# 0 이면 최하위까지 내려가 저층 건물까지 들어온다 (381동, 정점은 오히려 더 적다).
+BUILDING_DETAIL = 0
 LAYERS = {
     "site": u"AAD::대상필지",
     "parcels": u"AAD::인접필지",
@@ -511,10 +516,11 @@ def add_buildings3d(frame, radius, detail, max_tiles=None, textures=True):
     모달 대화상자를 띄운다 — 네이티브 3dm 이라야 조용히 들어온다.
 
     max_tiles 를 고정값으로 두면 범위가 넓을 때 건물이 잘린 채로 들어온다
-    (반경 500m 는 106장이 필요한데 40장만 받아 1/3 만 나왔다).
+    (반경 500m 는 239장이 필요한데 40장만 받아 1/3 만 나왔다).
     먼저 probe 로 필요한 장수를 세고 그만큼 요청한다.
     """
     west, south, east, north = frame.bbox(radius)
+    capped = False
     if max_tiles is None:
         probe = (
             "/api/vworld/buildings3d?bbox=%f,%f,%f,%f&detail=%d&maxTiles=%d&probe=1"
@@ -524,6 +530,8 @@ def add_buildings3d(frame, radius, detail, max_tiles=None, textures=True):
             max_tiles = int(get_json(probe).get("tiles", 0)) or BUILDING_TILE_CAP
         except Exception:
             max_tiles = BUILDING_TILE_CAP
+        # 상한과 같으면 더 있는데 잘렸을 수 있다 — 조용히 넘어가면 안 된다
+        capped = max_tiles >= BUILDING_TILE_CAP
     url = (
         "%s/api/vworld/buildings3d?bbox=%f,%f,%f,%f&lon=%f&lat=%f&detail=%d&maxTiles=%d&format=3dm&textures=%d"
         % (SERVER, west, south, east, north, frame.lon0, frame.lat0, detail, max_tiles, 1 if textures else 0)
@@ -610,7 +618,14 @@ def add_buildings3d(frame, radius, detail, max_tiles=None, textures=True):
         if sc.doc.Objects.Add(geometry, attributes) != System.Guid.Empty:
             count += 1
     source.Dispose()
-    return count, u"%d개 객체 · %.1fMB" % (count, os.path.getsize(zip_path) / 1048576.0)
+    note = u"%d개 객체 · 타일 %d장 · %.1fMB" % (
+        count,
+        max_tiles,
+        os.path.getsize(zip_path) / 1048576.0,
+    )
+    if capped:
+        note += u" ⚠ 타일 상한(%d)에 걸림 — 일부가 빠졌을 수 있음" % BUILDING_TILE_CAP
+    return count, note
 
 
 def add_buildings(features, frame, target_pnu, core_radius, terrain=None):
@@ -869,7 +884,7 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False, text
         notes.append(u"필지: 대상 1 + 인접 %d (폴리라인 %d)" % (neighbors, made))
 
         # 주변 건물 — 브이월드 3D 객체를 우선 쓰고, 없는 지역이면 대장 높이로 압출한다
-        count, bnote = add_buildings3d(frame, core["radius"], 5, None, textures)
+        count, bnote = add_buildings3d(frame, core["radius"], BUILDING_DETAIL, None, textures)
         if count:
             notes.append(
                 u"주변건물(3D 실물, %s): %s" % (u"텍스처" if textures else u"단색", bnote)
