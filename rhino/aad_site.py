@@ -35,6 +35,52 @@ clr.AddReference("System.IO.Compression.FileSystem")
 from System.IO.Compression import ZipFile
 from System.Net import WebClient
 from System.Drawing import Bitmap, Graphics, Rectangle
+from System.Drawing.Drawing2D import InterpolationMode
+from System.Drawing.Imaging import Encoder, EncoderParameter, EncoderParameters, ImageCodecInfo
+
+# 항공사진 텍스처 상한. 이보다 크면 라이노가 파일을 열 때 디코딩에 오래 걸려
+# "응답 없음" 상태가 된다 (실측: 13.4MB PNG 2장이 붙으면 열리지 않았다).
+MAX_TEXTURE_PX = 4096
+JPEG_QUALITY = 85
+
+
+def _jpeg_codec():
+    for codec in ImageCodecInfo.GetImageEncoders():
+        if codec.MimeType == "image/jpeg":
+            return codec
+    return None
+
+
+def save_texture(bitmap, path_without_ext):
+    """
+    항공사진을 JPEG 로 저장한다 — PNG 는 같은 그림이 5~10배 크고 디코딩도 느리다.
+    상한을 넘으면 줄여서 저장한다.
+    """
+    source = bitmap
+    longest = max(bitmap.Width, bitmap.Height)
+    if longest > MAX_TEXTURE_PX:
+        scale = float(MAX_TEXTURE_PX) / longest
+        w = int(bitmap.Width * scale)
+        h = int(bitmap.Height * scale)
+        resized = Bitmap(w, h)
+        g = Graphics.FromImage(resized)
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic
+        g.DrawImage(bitmap, 0, 0, w, h)
+        g.Dispose()
+        source = resized
+
+    codec = _jpeg_codec()
+    if codec:
+        path = path_without_ext + ".jpg"
+        params = EncoderParameters(1)
+        params.Param[0] = EncoderParameter(Encoder.Quality, JPEG_QUALITY)
+        source.Save(path, codec, params)
+    else:
+        path = path_without_ext + ".png"
+        source.Save(path, System.Drawing.Imaging.ImageFormat.Png)
+    if source is not bitmap:
+        source.Dispose()
+    return path
 
 SERVER = os.environ.get("AAD_SERVER", "http://localhost:3000")
 
@@ -289,10 +335,12 @@ def build_aerial(frame, radius, zoom):
             stream.Dispose()
     graphics.Dispose()
 
-    path = os.path.join(
-        tempfile.gettempdir(), "aad_aerial_%d_%d.png" % (radius, System.Environment.TickCount)
+    path = save_texture(
+        bitmap,
+        os.path.join(
+            tempfile.gettempdir(), "aad_aerial_%d_%d" % (radius, System.Environment.TickCount)
+        ),
     )
-    bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png)
     bitmap.Dispose()
 
     nw_lon, nw_lat = tile2deg(x0, y0, zoom)
@@ -302,7 +350,8 @@ def build_aerial(frame, radius, zoom):
 
     return (
         {"path": path, "extent": ((px0, py0), (px1, py1))},
-        u"%d/%d장 · %dpx" % (ok, cols * rows, cols * 256),
+        u"%d/%d장 · %dpx · %.1fMB"
+        % (ok, cols * rows, min(cols * 256, MAX_TEXTURE_PX), os.path.getsize(path) / 1048576.0),
     )
 
 
