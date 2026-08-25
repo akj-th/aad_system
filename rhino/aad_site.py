@@ -2,19 +2,21 @@
 """
 AAD Site Import — 브이월드 대지 컨텍스트를 라이노로 가져오기
 
-Rhino 7 (IronPython 2.7) 기준. _RunPythonScript 로 실행한다.
-데이터는 AAD 서버(Next.js)를 경유해 받는다 — API 키는 서버에만 있고
-플러그인에는 들어가지 않는다 (CLAUDE.md 절대 규칙).
+Rhino 7 (IronPython 2.7). _RunPythonScript 로 실행한다.
+데이터는 AAD 서버(Next.js)를 경유한다 — API 키는 서버에만 있다.
 
-가져오는 것
-  - 필지 경계 폴리라인 (대상 필지 / 주변 필지 레이어 분리)
-  - 항공사진 (타일 합성 → PictureFrame)
-  - 대지 정보 텍스트 (용도지역·면적·건폐율·용적률)
+두 단계로 범위를 정한다
+  1) 광역 범위: 조감도용 지형·항공사진을 어디까지 가져올지 (0.5~5km)
+     → 예상 규모(정점 수·타일 수·용량)를 먼저 보여주고 확인받는다
+  2) 코어 반경: 대상지 주변 어디까지를 최고 해상도로 볼지 (100~500m)
+     → 이 안쪽만 고해상도 지형·항공사진·필지선·건물 매스를 만든다
+
+이렇게 나누는 이유는 광역을 통째로 고해상도로 가져오면 라이노가 감당하지 못하기 때문이다.
+필지선도 광역 전체가 아니라 대상지와 인접 필지만 만든다.
 
 좌표계
-  대지 중심을 원점으로 하는 로컬 미터 좌표 (등장방형 근사).
-  웹 앱의 lib/map/draw.ts 와 같은 방식이라 두 도구가 좌표를 공유한다.
-  EarthAnchorPoint 도 함께 설정해 지리 좌표를 유지한다.
+  대지 중심을 원점으로 하는 로컬 미터 좌표(등장방형 근사).
+  웹 앱 lib/map/draw.ts 와 같은 방식이며 EarthAnchorPoint 도 설정한다.
 """
 
 import json
@@ -32,39 +34,50 @@ from System.Drawing import Bitmap, Graphics, Rectangle
 
 SERVER = os.environ.get("AAD_SERVER", "http://localhost:3000")
 
-# 반경(m)과 항공사진 줌을 묶어둔다 — 조합을 잘못 골라 라이노가 터지는 것을 막는다.
-# 실측(압구정): 500m 반경 필지 539개·정점 5,328개는 가볍지만,
-# 500m를 z20으로 깔면 타일 1,156장·8704px(289MB)로 감당이 안 된다.
-PRESETS = [
-    {"name": "대상지 (100m, 최고화질)", "radius": 100, "zoom": 20},
-    {"name": "근린 (300m, 고화질)", "radius": 300, "zoom": 19},
-    {"name": "광역 (500m, 표준)", "radius": 500, "zoom": 18},
-    {"name": "필지선만 (300m, 항공사진 없음)", "radius": 300, "zoom": 0},
+# --- 범위 옵션 --------------------------------------------------------------
+# 광역: 지형·항공사진이 커버할 전체 범위. 반경이 커질수록 해상도를 낮춘다.
+#   grid  = 지형 메시 한 변 정점 수 (129 → 16,641 정점 / 32,768 삼각형)
+#   zoom  = 항공사진 타일 줌 (z18 ≈ 0.47m/px, z16 ≈ 1.9m/px)
+WIDE_OPTIONS = [
+    {"label": u"0.5km — 대상지 주변만", "radius": 500, "grid": 129, "zoom": 18},
+    {"label": u"1km — 가로 구역", "radius": 1000, "grid": 161, "zoom": 17},
+    {"label": u"2km — 근린 생활권", "radius": 2000, "grid": 193, "zoom": 16},
+    {"label": u"3km — 광역 조감", "radius": 3000, "grid": 225, "zoom": 15},
+    {"label": u"5km — 도시 스케일", "radius": 5000, "grid": 257, "zoom": 14},
 ]
 
-MAX_TILES = 200  # 이보다 많으면 줌을 낮춘다
+# 코어: 대상지 주변 최고 해상도 구간. 지형·항공사진·필지선·건물이 여기 들어간다.
+CORE_OPTIONS = [
+    {"label": u"100m — 대상지만", "radius": 100, "grid": 129, "zoom": 20},
+    {"label": u"200m", "radius": 200, "grid": 161, "zoom": 20},
+    {"label": u"300m", "radius": 300, "grid": 193, "zoom": 19},
+    {"label": u"500m (권장)", "radius": 500, "grid": 225, "zoom": 19},
+]
+
+MAX_TILES = 240
 LAYERS = {
-    "site": "AAD::대상필지",
-    "parcels": "AAD::주변필지",
-    "photo": "AAD::항공사진",
-    "info": "AAD::대지정보",
+    "site": u"AAD::대상필지",
+    "parcels": u"AAD::인접필지",
+    "buildings": u"AAD::주변건물",
+    # 항공사진은 지형 메시의 텍스처로 들어간다 — 별도 레이어를 두지 않는다
+    "core_terrain": u"AAD::지형_코어",
+    "wide_terrain": u"AAD::지형_광역",
+    "info": u"AAD::대지정보",
 }
 
 
 # --- HTTP -------------------------------------------------------------------
 
 def get_json(path):
-    """서버에서 JSON 받기. IronPython 2.7 에는 requests 가 없어 .NET WebClient 를 쓴다."""
     client = WebClient()
     client.Encoding = System.Text.Encoding.UTF8
     try:
-        text = client.DownloadString(SERVER + path)
+        return json.loads(client.DownloadString(SERVER + path))
     finally:
         client.Dispose()
-    return json.loads(text)
 
 
-def download_tile(url, index, results):
+def _download(url, index, results):
     client = WebClient()
     try:
         results[index] = client.DownloadData(url)
@@ -74,11 +87,22 @@ def download_tile(url, index, results):
         client.Dispose()
 
 
-# --- 좌표 변환 ---------------------------------------------------------------
+def download_parallel(urls, batch=12):
+    results = [None] * len(urls)
+    for start in range(0, len(urls), batch):
+        threads = []
+        for i in range(start, min(start + batch, len(urls))):
+            t = threading.Thread(target=_download, args=(urls[i], i, results))
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
+    return results
+
+
+# --- 좌표 -------------------------------------------------------------------
 
 class Frame(object):
-    """대지 중심을 원점으로 하는 로컬 미터 좌표계"""
-
     def __init__(self, lon, lat):
         self.lon0 = lon
         self.lat0 = lat
@@ -88,88 +112,36 @@ class Frame(object):
     def to_local(self, lon, lat):
         return ((lon - self.lon0) * self.kx, (lat - self.lat0) * self.ky)
 
+    def bbox(self, radius):
+        dlon = radius / self.kx
+        dlat = radius / self.ky
+        return (self.lon0 - dlon, self.lat0 - dlat, self.lon0 + dlon, self.lat0 + dlat)
 
-# --- 타일 -------------------------------------------------------------------
 
 def deg2tile(lon, lat, z):
     n = 2.0 ** z
-    x = int((lon + 180.0) / 360.0 * n)
     rad = math.radians(lat)
-    y = int((1.0 - math.log(math.tan(rad) + 1.0 / math.cos(rad)) / math.pi) / 2.0 * n)
-    return x, y
+    return (
+        int((lon + 180.0) / 360.0 * n),
+        int((1.0 - math.log(math.tan(rad) + 1.0 / math.cos(rad)) / math.pi) / 2.0 * n),
+    )
 
 
 def tile2deg(x, y, z):
-    """타일 좌상단 경위도"""
     n = 2.0 ** z
     lon = x / n * 360.0 - 180.0
     lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
     return lon, lat
 
 
-def build_aerial(frame, radius, zoom):
-    """항공사진 타일을 받아 한 장으로 합성하고 (파일경로, 로컬좌표 범위) 를 돌려준다"""
-    dlon = radius / frame.kx
-    dlat = radius / frame.ky
-    x0, y0 = deg2tile(frame.lon0 - dlon, frame.lat0 + dlat, zoom)  # 좌상단
-    x1, y1 = deg2tile(frame.lon0 + dlon, frame.lat0 - dlat, zoom)  # 우하단
-    cols = x1 - x0 + 1
-    rows = y1 - y0 + 1
-    total = cols * rows
-    if total > MAX_TILES:
-        return None, None, "타일 %d장 — 상한(%d) 초과" % (total, MAX_TILES)
-
-    urls = []
-    for ty in range(y0, y1 + 1):
-        for tx in range(x0, x1 + 1):
-            urls.append("%s/api/vworld/tile/Satellite/%d/%d/%d" % (SERVER, zoom, ty, tx))
-
-    # 병렬로 받는다 — 타일 1장이 왕복 0.6초라 순차로 받으면 121장에 80초가 걸린다
-    results = [None] * len(urls)
-    batch = 12
-    for start in range(0, len(urls), batch):
-        threads = []
-        for i in range(start, min(start + batch, len(urls))):
-            t = threading.Thread(target=download_tile, args=(urls[i], i, results))
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join()
-
-    bitmap = Bitmap(cols * 256, rows * 256)
-    graphics = Graphics.FromImage(bitmap)
-    idx = 0
-    ok = 0
-    for row in range(rows):
-        for col in range(cols):
-            data = results[idx]
-            idx += 1
-            if not data:
-                continue
-            stream = System.IO.MemoryStream(data)
-            try:
-                tile = Bitmap(stream)
-                graphics.DrawImage(tile, Rectangle(col * 256, row * 256, 256, 256))
-                ok += 1
-            except Exception:
-                pass
-            finally:
-                stream.Dispose()
-    graphics.Dispose()
-
-    path = os.path.join(tempfile.gettempdir(), "aad_aerial_%d.png" % System.Environment.TickCount)
-    bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png)
-    bitmap.Dispose()
-
-    # 합성 이미지의 지리 범위 → 로컬 미터
-    nw_lon, nw_lat = tile2deg(x0, y0, zoom)
-    se_lon, se_lat = tile2deg(x1 + 1, y1 + 1, zoom)
-    p0 = frame.to_local(nw_lon, se_lat)  # 좌하단
-    p1 = frame.to_local(se_lon, nw_lat)  # 우상단
-    return path, (p0, p1), "타일 %d/%d장" % (ok, total)
+def tile_count(frame, radius, zoom):
+    west, south, east, north = frame.bbox(radius)
+    x0, y0 = deg2tile(west, north, zoom)
+    x1, y1 = deg2tile(east, south, zoom)
+    return (x1 - x0 + 1) * (y1 - y0 + 1)
 
 
-# --- 라이노 객체 생성 ---------------------------------------------------------
+# --- 레이어 -----------------------------------------------------------------
 
 def ensure_layer(name, color):
     if not rs.IsLayer(name):
@@ -177,92 +149,325 @@ def ensure_layer(name, color):
     return name
 
 
-def add_parcel_curves(features, frame, target_pnu, radius):
-    """
-    필지 경계를 폴리라인으로. 대상 필지는 별도 레이어로 강조한다.
-
-    도로·하천 필지는 수 km로 길게 이어져 있어 bbox에 조금만 걸쳐도 통째로 딸려온다
-    (실측: 반경 300m 요청에 2,441m 도로 필지가 들어와 도면 범위가 4배로 늘어남).
-    요청 반경에 비해 지나치게 큰 필지는 건너뛴다.
-    """
-    ensure_layer(LAYERS["parcels"], (120, 120, 120))
+def setup_layers():
     ensure_layer(LAYERS["site"], (255, 120, 0))
-    max_span = radius * 1.5
-    count = 0
-    skipped = 0
-    for feature in features:
-        props = feature.get("properties", {})
-        geom = feature.get("geometry", {})
-        polys = (
-            [geom.get("coordinates", [])]
-            if geom.get("type") == "Polygon"
-            else geom.get("coordinates", [])
-        )
-        is_target = target_pnu and props.get("pnu") == target_pnu
+    ensure_layer(LAYERS["parcels"], (120, 120, 120))
+    ensure_layer(LAYERS["buildings"], (190, 190, 200))
+    ensure_layer(LAYERS["core_terrain"], (150, 170, 140))
+    ensure_layer(LAYERS["wide_terrain"], (170, 180, 165))
+    ensure_layer(LAYERS["info"], (0, 0, 0))
 
+
+# --- 지형 -------------------------------------------------------------------
+
+class Terrain(object):
+    """지형 격자 — 메시 생성과 임의 지점 고도 조회에 함께 쓴다"""
+
+    def __init__(self, radius, grid, heights, level, hmin, hmax):
+        self.radius = radius
+        self.grid = grid
+        self.heights = heights
+        self.level = level
+        self.min = hmin
+        self.max = hmax
+        self.step = (2.0 * radius) / (grid - 1)
+
+    def height_at(self, x, y):
+        """로컬 좌표의 지형 고도 (격자 최근접). 범위 밖이면 None"""
+        if abs(x) > self.radius or abs(y) > self.radius:
+            return None
+        c = int(round((x + self.radius) / self.step))
+        r = int(round((y + self.radius) / self.step))
+        c = max(0, min(self.grid - 1, c))
+        r = max(0, min(self.grid - 1, r))
+        return self.heights[r * self.grid + c]
+
+
+def fetch_terrain(frame, radius, grid):
+    west, south, east, north = frame.bbox(radius)
+    data = get_json(
+        "/api/vworld/elevation?bbox=%f,%f,%f,%f&grid=%d" % (west, south, east, north, grid)
+    )
+    if data.get("error"):
+        return None, data["error"]
+    return (
+        Terrain(radius, data["grid"], data["heights"], data["level"], data["min"], data["max"]),
+        u"level %d · %d×%d · %.0f~%.0fm" % (data["level"], data["grid"], data["grid"], data["min"], data["max"]),
+    )
+
+
+def build_terrain_mesh(terrain, layer, photo=None, hole_radius=None):
+    """
+    지형 메시를 만들고 항공사진을 텍스처로 입힌다.
+
+    사진을 별도 평면(PictureFrame)으로 깔면 지형에 가려 보이지 않는다 —
+    메시 정점마다 UV 를 계산해 재질 텍스처로 붙여야 지형 위에 사진이 얹힌다.
+    hole_radius 안쪽 면은 비워 코어 메시와 겹치지 않게 한다.
+    """
+    g = terrain.grid
+    radius = terrain.radius
+    step = terrain.step
+    mesh = Rhino.Geometry.Mesh()
+
+    px0 = py0 = px1 = py1 = None
+    if photo:
+        (px0, py0), (px1, py1) = photo["extent"]
+
+    for r in range(g):
+        y = -radius + step * r
+        for c in range(g):
+            x = -radius + step * c
+            mesh.Vertices.Add(x, y, terrain.heights[r * g + c])
+            if photo:
+                u = (x - px0) / (px1 - px0)
+                v = (y - py0) / (py1 - py0)
+                mesh.TextureCoordinates.Add(u, v)
+
+    for r in range(g - 1):
+        for c in range(g - 1):
+            if hole_radius is not None:
+                cx = -radius + step * (c + 0.5)
+                cy = -radius + step * (r + 0.5)
+                if abs(cx) < hole_radius and abs(cy) < hole_radius:
+                    continue
+            i = r * g + c
+            mesh.Faces.AddFace(i, i + 1, i + g + 1, i + g)
+    mesh.Normals.ComputeNormals()
+    mesh.Compact()
+
+    rs.CurrentLayer(layer)
+    obj = sc.doc.Objects.AddMesh(mesh)
+    if obj and photo:
+        index = sc.doc.Materials.Add()
+        material = sc.doc.Materials[index]
+        material.SetBitmapTexture(photo["path"])
+        material.CommitChanges()
+        attrs = sc.doc.Objects.Find(obj).Attributes
+        attrs.MaterialIndex = index
+        attrs.MaterialSource = Rhino.DocObjects.ObjectMaterialSource.MaterialFromObject
+        sc.doc.Objects.ModifyAttributes(obj, attrs, True)
+    return obj
+
+
+# --- 항공사진 ---------------------------------------------------------------
+
+def build_aerial(frame, radius, zoom):
+    """타일을 받아 한 장으로 합성한다. 지형 메시의 텍스처로 쓰이므로 객체는 만들지 않는다"""
+    west, south, east, north = frame.bbox(radius)
+    x0, y0 = deg2tile(west, north, zoom)
+    x1, y1 = deg2tile(east, south, zoom)
+    cols, rows = x1 - x0 + 1, y1 - y0 + 1
+    if cols * rows > MAX_TILES:
+        return None, u"타일 %d장 초과" % (cols * rows)
+
+    urls = []
+    for ty in range(y0, y1 + 1):
+        for tx in range(x0, x1 + 1):
+            urls.append("%s/api/vworld/tile/Satellite/%d/%d/%d" % (SERVER, zoom, ty, tx))
+    results = download_parallel(urls)
+
+    bitmap = Bitmap(cols * 256, rows * 256)
+    graphics = Graphics.FromImage(bitmap)
+    ok = 0
+    for i, data in enumerate(results):
+        if not data:
+            continue
+        stream = System.IO.MemoryStream(data)
+        try:
+            graphics.DrawImage(Bitmap(stream), Rectangle((i % cols) * 256, (i // cols) * 256, 256, 256))
+            ok += 1
+        except Exception:
+            pass
+        finally:
+            stream.Dispose()
+    graphics.Dispose()
+
+    path = os.path.join(
+        tempfile.gettempdir(), "aad_aerial_%d_%d.png" % (radius, System.Environment.TickCount)
+    )
+    bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png)
+    bitmap.Dispose()
+
+    nw_lon, nw_lat = tile2deg(x0, y0, zoom)
+    se_lon, se_lat = tile2deg(x1 + 1, y1 + 1, zoom)
+    px0, py0 = frame.to_local(nw_lon, se_lat)
+    px1, py1 = frame.to_local(se_lon, nw_lat)
+
+    return (
+        {"path": path, "extent": ((px0, py0), (px1, py1))},
+        u"%d/%d장 · %dpx" % (ok, cols * rows, cols * 256),
+    )
+
+
+# --- 필지·건물 --------------------------------------------------------------
+
+def parcel_rings(feature, frame):
+    geom = feature.get("geometry", {})
+    polys = (
+        [geom.get("coordinates", [])]
+        if geom.get("type") == "Polygon"
+        else geom.get("coordinates", [])
+    )
+    out = []
+    for rings in polys:
+        for ring in rings:
+            pts = [frame.to_local(p[0], p[1]) for p in ring]
+            if len(pts) >= 3:
+                out.append(pts)
+    return out
+
+
+def add_parcels(features, frame, target_pnu, core_radius, terrain=None):
+    """
+    대상 필지와 그 인접 필지만 만든다 — 광역 전체 필지선은 도면을 어지럽히기만 한다.
+    인접 판정: 대상 필지 경계에서 일정 거리(기본 40m) 안에 걸치는 필지.
+    도로·하천처럼 지나치게 긴 필지는 제외한다.
+    """
+    target_rings = None
+    for f in features:
+        if target_pnu and f.get("properties", {}).get("pnu") == target_pnu:
+            target_rings = parcel_rings(f, frame)
+            break
+
+    if target_rings:
+        txs = [p[0] for r in target_rings for p in r]
+        tys = [p[1] for r in target_rings for p in r]
+        tminx, tmaxx, tminy, tmaxy = min(txs), max(txs), min(tys), max(tys)
+    else:
+        tminx = tminy = -30.0
+        tmaxx = tmaxy = 30.0
+
+    NEIGHBOR_PAD = 40.0
+    max_span = core_radius * 1.5
+    made, neighbors, skipped = 0, 0, 0
+
+    for f in features:
+        props = f.get("properties", {})
+        rings = parcel_rings(f, frame)
+        if not rings:
+            continue
+        is_target = target_pnu and props.get("pnu") == target_pnu
         if not is_target:
-            xs, ys = [], []
-            for rings in polys:
-                for ring in rings:
-                    for pair in ring:
-                        x, y = frame.to_local(pair[0], pair[1])
-                        xs.append(x)
-                        ys.append(y)
-            if xs and max(max(xs) - min(xs), max(ys) - min(ys)) > max_span:
+            xs = [p[0] for r in rings for p in r]
+            ys = [p[1] for r in rings for p in r]
+            if max(max(xs) - min(xs), max(ys) - min(ys)) > max_span:
                 skipped += 1
                 continue
+            # 대상 필지 근방과 겹치지 않으면 제외
+            if (
+                max(xs) < tminx - NEIGHBOR_PAD
+                or min(xs) > tmaxx + NEIGHBOR_PAD
+                or max(ys) < tminy - NEIGHBOR_PAD
+                or min(ys) > tmaxy + NEIGHBOR_PAD
+            ):
+                continue
+            neighbors += 1
 
         rs.CurrentLayer(LAYERS["site"] if is_target else LAYERS["parcels"])
-        for rings in polys:
-            for ring in rings:
-                pts = []
-                for pair in ring:
-                    x, y = frame.to_local(pair[0], pair[1])
-                    pts.append((x, y, 0))
-                if len(pts) < 3:
-                    continue
-                if pts[0] != pts[-1]:
-                    pts.append(pts[0])
-                curve = rs.AddPolyline(pts)
-                if curve:
-                    count += 1
-                    if props.get("jibun"):
-                        rs.SetUserText(curve, "jibun", props["jibun"])
-                    if props.get("pnu"):
-                        rs.SetUserText(curve, "pnu", props["pnu"])
-    return count, skipped
+        for pts in rings:
+            # 지형 위로 살짝 띄운다 — Z=0 에 두면 지형 메시에 묻혀 보이지 않는다
+            pts3 = []
+            for x, y in pts:
+                z = 0.0
+                if terrain:
+                    h = terrain.height_at(x, y)
+                    if h is not None:
+                        z = h + 0.3
+                pts3.append((x, y, z))
+            if pts3[0] != pts3[-1]:
+                pts3.append(pts3[0])
+            curve = rs.AddPolyline(pts3)
+            if curve:
+                made += 1
+                if props.get("jibun"):
+                    rs.SetUserText(curve, "jibun", props["jibun"])
+                if props.get("pnu"):
+                    rs.SetUserText(curve, "pnu", props["pnu"])
+    return made, neighbors, skipped
 
 
-def add_aerial(path, extent):
-    """합성 항공사진을 바닥에 PictureFrame 으로 깐다"""
-    ensure_layer(LAYERS["photo"], (200, 200, 200))
-    rs.CurrentLayer(LAYERS["photo"])
-    (x0, y0), (x1, y1) = extent
-    # 필지선보다 살짝 아래에 둬서 선이 가리지 않게 한다
-    plane = Rhino.Geometry.Plane(
-        Rhino.Geometry.Point3d(x0, y0, -0.05),
-        Rhino.Geometry.Vector3d.XAxis,
-        Rhino.Geometry.Vector3d.YAxis,
-    )
-    return sc.doc.Objects.AddPictureFrame(
-        plane, path, False, abs(x1 - x0), abs(y1 - y0), False, False
-    )
+def add_buildings(features, frame, target_pnu, core_radius, terrain=None):
+    """코어 범위 필지의 건축물대장 높이로 매스를 세운다 (지형 고도 위에서 압출)"""
+    candidates = []
+    for f in features:
+        props = f.get("properties", {})
+        pnu = props.get("pnu")
+        if not pnu or pnu == target_pnu:
+            continue
+        rings = parcel_rings(f, frame)
+        if not rings:
+            continue
+        xs = [p[0] for r in rings for p in r]
+        ys = [p[1] for r in rings for p in r]
+        # 코어 안쪽에 있고, 지나치게 큰 필지(도로 등)는 제외
+        cx = (min(xs) + max(xs)) / 2.0
+        cy = (min(ys) + max(ys)) / 2.0
+        if math.hypot(cx, cy) > core_radius:
+            continue
+        if max(max(xs) - min(xs), max(ys) - min(ys)) > core_radius:
+            continue
+        candidates.append((pnu, rings))
+
+    if not candidates:
+        return 0, 0
+
+    # 서버가 병렬로 묶어서 조회한다
+    heights = {}
+    step = 100
+    for i in range(0, len(candidates), step):
+        pnus = ",".join([c[0] for c in candidates[i : i + step]])
+        try:
+            data = get_json("/api/vworld/buildings?pnus=" + pnus)
+            for b in data.get("buildings", []):
+                if b.get("height"):
+                    heights[b["pnu"]] = b
+        except Exception:
+            pass
+
+    rs.CurrentLayer(LAYERS["buildings"])
+    made = 0
+    for pnu, rings in candidates:
+        info = heights.get(pnu)
+        if not info or not info.get("height"):
+            continue
+        # 필지 바닥을 지형 고도에 맞춘다 (지형이 없으면 0)
+        base_z = 0.0
+        if terrain:
+            zs = [terrain.height_at(x, y) for x, y in rings[0]]
+            zs = [z for z in zs if z is not None]
+            if zs:
+                base_z = min(zs)
+        pts3 = [(x, y, base_z) for x, y in rings[0]]
+        if pts3[0] != pts3[-1]:
+            pts3.append(pts3[0])
+        base = rs.AddPolyline(pts3)
+        if not base:
+            continue
+        solid = rs.ExtrudeCurveStraight(base, (0, 0, 0), (0, 0, float(info["height"])))
+        rs.DeleteObject(base)
+        if solid:
+            rs.CapPlanarHoles(solid)
+            rs.SetUserText(solid, "pnu", pnu)
+            if info.get("mainUse"):
+                rs.SetUserText(solid, "use", info["mainUse"])
+            if info.get("floors"):
+                rs.SetUserText(solid, "floors", str(info["floors"]))
+            made += 1
+    return made, len(candidates)
 
 
-def add_info_text(lines, frame_radius):
-    ensure_layer(LAYERS["info"], (0, 0, 0))
+# --- 정보 텍스트 ------------------------------------------------------------
+
+def add_info_text(lines, radius):
     rs.CurrentLayer(LAYERS["info"])
-    height = max(1.5, frame_radius * 0.02)
-    y = frame_radius * 0.9
-    ids = []
+    height = max(2.0, radius * 0.012)
+    y = radius * 0.92
     for line in lines:
-        ids.append(rs.AddText(line, (-frame_radius * 0.95, y, 0), height))
+        rs.AddText(line, (-radius * 0.95, y, 0), height)
         y -= height * 1.6
-    return ids
 
 
 def set_earth_anchor(lon, lat):
-    """지리 좌표 유지 — 나중에 다른 지리 데이터를 겹칠 때 기준이 된다"""
     anchor = Rhino.DocObjects.EarthAnchorPoint()
     anchor.EarthBasepointLatitude = lat
     anchor.EarthBasepointLongitude = lon
@@ -275,127 +480,173 @@ def set_earth_anchor(lon, lat):
 
 # --- 메인 -------------------------------------------------------------------
 
-def run(address=None, preset_index=None):
-    # 1) 주소 검색
+def estimate(wide, core):
+    """가져오기 전에 규모를 알려준다 — 라이노가 감당할지 스스로 판단할 수 있게"""
+    wide_v = wide["grid"] ** 2
+    core_v = core["grid"] ** 2
+    return (
+        u"[광역 %.1fkm] 지형 %s정점 · 항공사진 타일 %d장\n"
+        u"[코어 %dm] 지형 %s정점 · 항공사진 타일 %d장\n"
+        u"합계 정점 약 %s개\n\n계속할까요?"
+        % (
+            wide["radius"] / 1000.0,
+            "{:,}".format(wide_v),
+            wide["tiles"],
+            core["radius"],
+            "{:,}".format(core_v),
+            core["tiles"],
+            "{:,}".format(wide_v + core_v),
+        )
+    )
+
+
+def run(address=None, wide_index=None, core_index=None, skip_confirm=False):
+    # 1) 대상지
     if address is None:
-        address = rs.GetString("대지 주소 또는 지번 (예: 압구정로29길 17)")
+        address = rs.GetString(u"대지 주소 또는 지번 (예: 압구정로29길 17)")
     if not address:
         return
-
     try:
         found = get_json("/api/vworld/search?q=" + System.Uri.EscapeDataString(address))
     except Exception as e:
-        rs.MessageBox("서버에 연결할 수 없습니다.\n%s\n\n%s" % (SERVER, e), 16)
+        rs.MessageBox(u"서버에 연결할 수 없습니다.\n%s\n\n%s" % (SERVER, e), 16)
         return
     items = found.get("items", [])
     if not items:
-        rs.MessageBox("검색 결과가 없습니다: %s" % address, 48)
+        rs.MessageBox(u"검색 결과가 없습니다: %s" % address, 48)
         return
-
-    if len(items) == 1 or preset_index is not None:
+    if len(items) == 1 or wide_index is not None:
         picked = items[0]
     else:
         labels = [it.get("title") or it.get("parcelAddr") for it in items]
-        chosen = rs.ListBox(labels, "대지를 선택하세요", "AAD Site")
+        chosen = rs.ListBox(labels, u"대지를 선택하세요", u"AAD Site")
         if not chosen:
             return
         picked = items[labels.index(chosen)]
 
-    lon = float(picked["lon"])
-    lat = float(picked["lat"])
+    lon, lat = float(picked["lon"]), float(picked["lat"])
+    frame = Frame(lon, lat)
 
-    # 2) 프리셋
-    if preset_index is None:
-        names = [p["name"] for p in PRESETS]
-        chosen = rs.ListBox(names, "가져올 범위와 화질", "AAD Site")
+    # 2) 광역 범위
+    if wide_index is None:
+        labels = [w["label"] for w in WIDE_OPTIONS]
+        chosen = rs.ListBox(labels, u"1단계 — 지형·항공사진 전체 범위", u"AAD Site")
         if not chosen:
             return
-        preset = PRESETS[names.index(chosen)]
+        wide = dict(WIDE_OPTIONS[labels.index(chosen)])
     else:
-        preset = PRESETS[preset_index]
-    radius = preset["radius"]
-    zoom = preset["zoom"]
+        wide = dict(WIDE_OPTIONS[wide_index])
 
-    frame = Frame(lon, lat)
-    dlon = radius / frame.kx
-    dlat = radius / frame.ky
-    bbox = "%f,%f,%f,%f" % (lon - dlon, lat - dlat, lon + dlon, lat + dlat)
+    # 3) 코어 반경
+    if core_index is None:
+        labels = [c["label"] for c in CORE_OPTIONS]
+        chosen = rs.ListBox(labels, u"2단계 — 최고 해상도로 볼 대상지 반경", u"AAD Site")
+        if not chosen:
+            return
+        core = dict(CORE_OPTIONS[labels.index(chosen)])
+    else:
+        core = dict(CORE_OPTIONS[core_index])
+    if core["radius"] >= wide["radius"]:
+        core["radius"] = max(100, wide["radius"] // 3)
 
-    # 3) 필지
-    try:
-        fc = get_json("/api/vworld/parcels?bbox=" + bbox)
-    except Exception as e:
-        rs.MessageBox("필지 조회 실패\n%s" % e, 16)
-        return
-    features = fc.get("features", [])
+    # 4) 규모 확인
+    wide["tiles"] = tile_count(frame, wide["radius"], wide["zoom"])
+    core["tiles"] = tile_count(frame, core["radius"], core["zoom"])
+    while wide["tiles"] > MAX_TILES and wide["zoom"] > 12:
+        wide["zoom"] -= 1
+        wide["tiles"] = tile_count(frame, wide["radius"], wide["zoom"])
+    while core["tiles"] > MAX_TILES and core["zoom"] > 14:
+        core["zoom"] -= 1
+        core["tiles"] = tile_count(frame, core["radius"], core["zoom"])
 
-    # 대상 필지 = 검색 좌표를 품은 필지
-    target_pnu = None
-    try:
-        one = get_json("/api/vworld/parcel?lon=%f&lat=%f" % (lon, lat))
-        if one.get("parcel"):
-            target_pnu = one["parcel"].get("pnu")
-    except Exception:
-        pass
+    if not skip_confirm:
+        if rs.MessageBox(estimate(wide, core), 1 | 32, u"가져올 규모") != 1:
+            return
 
     rs.EnableRedraw(False)
-    prev_layer = rs.CurrentLayer()
+    prev = rs.CurrentLayer()
+    notes = []
     try:
+        setup_layers()
         set_earth_anchor(lon, lat)
-        curve_count, skipped = add_parcel_curves(features, frame, target_pnu, radius)
 
-        # 4) 항공사진
-        tile_note = "생략"
-        if zoom > 0:
-            path, extent, tile_note = build_aerial(frame, radius, zoom)
-            if path:
-                add_aerial(path, extent)
+        # 항공사진을 먼저 받아 지형 메시의 텍스처로 쓴다
+        wide_photo, wide_photo_note = build_aerial(frame, wide["radius"], wide["zoom"])
+        notes.append(u"항공(광역): " + wide_photo_note)
+        core_photo, core_photo_note = build_aerial(frame, core["radius"], core["zoom"])
+        notes.append(u"항공(코어): " + core_photo_note)
 
-        # 5) 대지 정보
-        info_lines = [u"AAD 대지 컨텍스트", picked.get("title", address)]
+        # 지형 — 광역은 코어 부분을 비워 겹치지 않게 한다
+        wide_terrain, wide_note = fetch_terrain(frame, wide["radius"], wide["grid"])
+        notes.append(u"지형(광역): " + wide_note)
+        if wide_terrain:
+            build_terrain_mesh(
+                wide_terrain, LAYERS["wide_terrain"], wide_photo, core["radius"]
+            )
+        core_terrain, core_note = fetch_terrain(frame, core["radius"], core["grid"])
+        notes.append(u"지형(코어): " + core_note)
+        if core_terrain:
+            build_terrain_mesh(core_terrain, LAYERS["core_terrain"], core_photo)
+
+        # 필지 — 코어 범위에서 받아 대상지+인접만 그린다
+        west, south, east, north = frame.bbox(core["radius"])
+        fc = get_json("/api/vworld/parcels?bbox=%f,%f,%f,%f" % (west, south, east, north))
+        features = fc.get("features", [])
+        target_pnu = None
+        try:
+            one = get_json("/api/vworld/parcel?lon=%f&lat=%f" % (lon, lat))
+            if one.get("parcel"):
+                target_pnu = one["parcel"].get("pnu")
+        except Exception:
+            pass
+        made, neighbors, skipped = add_parcels(
+            features, frame, target_pnu, core["radius"], core_terrain
+        )
+        notes.append(u"필지: 대상 1 + 인접 %d (폴리라인 %d)" % (neighbors, made))
+
+        built, tried = add_buildings(
+            features, frame, target_pnu, core["radius"], core_terrain
+        )
+        notes.append(u"주변건물: %d동 (후보 %d)" % (built, tried))
+
+        # 대지 정보
+        info = [u"AAD 대지 컨텍스트", picked.get("title", address)]
         if target_pnu:
             try:
                 land = get_json("/api/vworld/landinfo?pnu=" + target_pnu).get("landInfo", {})
                 if land.get("useZone"):
-                    info_lines.append(u"용도지역: %s" % land["useZone"])
+                    info.append(u"용도지역: %s" % land["useZone"])
                 if land.get("officialArea"):
-                    info_lines.append(u"대지면적: %s m2 (공부)" % land["officialArea"])
+                    info.append(u"대지면적: %s m2 (공부)" % land["officialArea"])
                 if land.get("roadSide"):
-                    info_lines.append(u"도로접면: %s / 지형: %s" % (land.get("roadSide"), land.get("terrain")))
-                for b in (land.get("buildings") or [])[:1]:
-                    info_lines.append(
-                        u"기존건축물: %s %s 지상%s층" % (b.get("mainUse"), b.get("structure"), b.get("groundFloors"))
-                    )
+                    info.append(u"도로접면: %s / 지형: %s" % (land.get("roadSide"), land.get("terrain")))
             except Exception:
                 pass
-        info_lines.append(
-            u"반경 %dm · 필지 %d개%s · 항공사진 %s"
-            % (radius, len(features) - skipped, (u" (대형 %d개 제외)" % skipped) if skipped else u"", tile_note)
-        )
-        info_lines.append(u"참고용 — 최종 확인은 담당 건축사 책임")
-        add_info_text(info_lines, radius)
+        info.append(u"광역 %.1fkm / 코어 %dm" % (wide["radius"] / 1000.0, core["radius"]))
+        info.extend(notes)
+        info.append(u"참고용 — 최종 확인은 담당 건축사 책임")
+        add_info_text(info, core["radius"])
     finally:
-        rs.CurrentLayer(prev_layer)
+        rs.CurrentLayer(prev)
         rs.EnableRedraw(True)
 
-    # 대상 필지가 화면 중앙에 오도록 — 전체 ZoomExtents 는 외곽 필지 때문에 너무 넓어진다
     site_objs = rs.ObjectsByLayer(LAYERS["site"])
     if site_objs:
         rs.ZoomBoundingBox(rs.BoundingBox(site_objs), None, True)
-        rs.Command("_Zoom _Out _Enter", False)
-        rs.Command("_Zoom _Out _Enter", False)
     else:
         rs.ZoomExtents()
-    print(
-        "AAD: 필지 %d개(대형 %d개 제외) · 폴리라인 %d개 · %s"
-        % (len(features) - skipped, skipped, curve_count, tile_note)
-    )
+    for line in notes:
+        print(line.encode("utf-8") if isinstance(line, unicode) else line)
 
 
 if __name__ == "__main__":
-    # 자동 테스트용 진입점 (환경변수로 대화 없이 실행)
-    test_addr = os.environ.get("AAD_TEST_ADDRESS")
-    if test_addr:
-        run(test_addr, int(os.environ.get("AAD_TEST_PRESET", "1")))
+    addr = os.environ.get("AAD_TEST_ADDRESS")
+    if addr:
+        run(
+            addr,
+            int(os.environ.get("AAD_TEST_WIDE", "2")),
+            int(os.environ.get("AAD_TEST_CORE", "3")),
+            True,
+        )
     else:
         run()
