@@ -12,7 +12,9 @@ import { documentTo3dmZip } from "@/lib/server/gltfTo3dm";
 // 타일 수십 개 다운로드 + Draco 디코딩 + 변환
 export const maxDuration = 180;
 
-const MAX_TILES = 80;
+// probe(타일 세기)는 tileset JSON 만 읽으므로 상한을 넉넉히 둔다.
+// 실제 변환은 타일마다 b3dm 다운로드 + Draco 디코딩이 붙는다.
+const MAX_TILES = 600;
 
 export async function GET(request: Request) {
   const sp = new URL(request.url).searchParams;

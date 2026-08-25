@@ -156,6 +156,10 @@ CORE_OPTIONS = [
 DEFAULT_CORE = 3  # 500m
 
 MAX_TILES = 240
+
+# 3D 건물 타일 상한. 실측: 반경 500m = 106장 · 5초 · 정점 195,538.
+# 상한에 걸리면 건물이 잘린 채로 들어오므로 넉넉히 둔다.
+BUILDING_TILE_CAP = 400
 LAYERS = {
     "site": u"AAD::대상필지",
     "parcels": u"AAD::인접필지",
@@ -324,12 +328,20 @@ def build_terrain_mesh(terrain, layer, photo=None, hole_radius=None):
                 v = (y - py0) / (py1 - py0)
                 mesh.TextureCoordinates.Add(u, v)
 
+    # 셀 '중심'이 구멍 안인지로 판정하면 셀 절반(step/2)만큼 구멍이 커져
+    # 코어 메시와의 사이에 빈 띠가 생긴다. 광역이 넓을수록 step 이 커져
+    # 띠도 넓어진다 (5km→약 20m, 25km→약 74m).
+    # 셀 '전체'가 구멍 안일 때만 비운다 — 구멍은 절대 코어보다 커지지 않는다.
+    eps = step * 1e-6
     for r in range(g - 1):
         for c in range(g - 1):
             if hole_radius is not None:
-                cx = -radius + step * (c + 0.5)
-                cy = -radius + step * (r + 0.5)
-                if abs(cx) < hole_radius and abs(cy) < hole_radius:
+                x0 = -radius + step * c
+                y0 = -radius + step * r
+                if (
+                    max(abs(x0), abs(x0 + step)) <= hole_radius + eps
+                    and max(abs(y0), abs(y0 + step)) <= hole_radius + eps
+                ):
                     continue
             i = r * g + c
             mesh.Faces.AddFace(i, i + 1, i + g + 1, i + g)
@@ -490,15 +502,28 @@ def add_parcels(features, frame, target_pnu, core_radius, terrain=None):
     return made, neighbors, skipped
 
 
-def add_buildings3d(frame, radius, detail, max_tiles=40, textures=True):
+def add_buildings3d(frame, radius, detail, max_tiles=None, textures=True):
     """
     브이월드 3D 건물(b3dm)을 그대로 가져온다 — 텍스처가 입혀진 실제 형상이다.
 
     서버가 타일을 받아 대지 중심 로컬 좌표로 옮긴 뒤 .3dm + 텍스처 zip 으로 준다.
     Rhino 7 은 glTF 가져오기를 지원하지 않고, OBJ 가져오기는 스크립트로 억제할 수 없는
     모달 대화상자를 띄운다 — 네이티브 3dm 이라야 조용히 들어온다.
+
+    max_tiles 를 고정값으로 두면 범위가 넓을 때 건물이 잘린 채로 들어온다
+    (반경 500m 는 106장이 필요한데 40장만 받아 1/3 만 나왔다).
+    먼저 probe 로 필요한 장수를 세고 그만큼 요청한다.
     """
     west, south, east, north = frame.bbox(radius)
+    if max_tiles is None:
+        probe = (
+            "/api/vworld/buildings3d?bbox=%f,%f,%f,%f&detail=%d&maxTiles=%d&probe=1"
+            % (west, south, east, north, detail, BUILDING_TILE_CAP)
+        )
+        try:
+            max_tiles = int(get_json(probe).get("tiles", 0)) or BUILDING_TILE_CAP
+        except Exception:
+            max_tiles = BUILDING_TILE_CAP
     url = (
         "%s/api/vworld/buildings3d?bbox=%f,%f,%f,%f&lon=%f&lat=%f&detail=%d&maxTiles=%d&format=3dm&textures=%d"
         % (SERVER, west, south, east, north, frame.lon0, frame.lat0, detail, max_tiles, 1 if textures else 0)
@@ -796,15 +821,28 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False, text
         setup_layers()
         set_earth_anchor(lon, lat)
 
-        # 항공사진을 먼저 받아 지형 메시의 텍스처로 쓴다
+        # 광역 지형을 먼저 받아 '실제' 격자 간격을 알아낸다.
+        # 서버가 grid 를 조정할 수 있으므로 옵션값이 아니라 받은 값을 써야 한다.
+        wide_terrain, wide_note = fetch_terrain(frame, wide["radius"], wide["grid"])
+        notes.append(u"지형(광역): " + wide_note)
+
+        # 코어 반경을 광역 격자선에 맞춘다 — 그래야 구멍과 코어가 정확히 맞물린다.
+        if wide_terrain:
+            snapped = wide_terrain.step * math.ceil(core["radius"] / wide_terrain.step)
+            if abs(snapped - core["radius"]) > 0.5:
+                notes.append(
+                    u"코어 반경 %dm → %.0fm (광역 격자 %.1fm 에 맞춤)"
+                    % (core["radius"], snapped, wide_terrain.step)
+                )
+            core["radius"] = snapped
+
+        # 항공사진은 지형 메시의 텍스처로 쓴다 (반경이 확정된 뒤에 받는다)
         wide_photo, wide_photo_note = build_aerial(frame, wide["radius"], wide["zoom"])
         notes.append(u"항공(광역): " + wide_photo_note)
         core_photo, core_photo_note = build_aerial(frame, core["radius"], core["zoom"])
         notes.append(u"항공(코어): " + core_photo_note)
 
-        # 지형 — 광역은 코어 부분을 비워 겹치지 않게 한다
-        wide_terrain, wide_note = fetch_terrain(frame, wide["radius"], wide["grid"])
-        notes.append(u"지형(광역): " + wide_note)
+        # 광역은 코어 부분을 비워 겹치지 않게 한다
         if wide_terrain:
             build_terrain_mesh(
                 wide_terrain, LAYERS["wide_terrain"], wide_photo, core["radius"]
@@ -831,7 +869,7 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False, text
         notes.append(u"필지: 대상 1 + 인접 %d (폴리라인 %d)" % (neighbors, made))
 
         # 주변 건물 — 브이월드 3D 객체를 우선 쓰고, 없는 지역이면 대장 높이로 압출한다
-        count, bnote = add_buildings3d(frame, core["radius"], 5, 40, textures)
+        count, bnote = add_buildings3d(frame, core["radius"], 5, None, textures)
         if count:
             notes.append(
                 u"주변건물(3D 실물, %s): %s" % (u"텍스처" if textures else u"단색", bnote)
