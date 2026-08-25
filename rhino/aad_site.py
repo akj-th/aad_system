@@ -24,6 +24,7 @@ import math
 import os
 import tempfile
 import threading
+import time
 
 import Rhino
 import rhinoscriptsyntax as rs
@@ -83,6 +84,53 @@ def save_texture(bitmap, path_without_ext):
     return path
 
 SERVER = os.environ.get("AAD_SERVER", "http://localhost:3000")
+
+# 이 스크립트가 있는 폴더의 상위가 AAD 프로젝트 폴더다 (rhino/aad_site.py)
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def server_alive(timeout_ms=1500):
+    try:
+        request = System.Net.WebRequest.Create(SERVER + "/api/health")
+        request.Timeout = timeout_ms
+        response = request.GetResponse()
+        response.Close()
+        return True
+    except Exception:
+        return False
+
+
+def ensure_server(wait_sec=90):
+    """
+    서버가 꺼져 있으면 대신 띄운다 — 라이노만 열고 쓸 수 있어야 한다.
+    이미 떠 있으면 아무것도 하지 않는다 (중복 기동 금지).
+    """
+    if server_alive():
+        return True
+    if os.environ.get("AAD_SERVER"):
+        # 원격 서버를 가리키는 중이면 우리가 띄울 대상이 아니다
+        return False
+    if not os.path.isfile(os.path.join(PROJECT_DIR, "package.json")):
+        return False
+
+    info = System.Diagnostics.ProcessStartInfo()
+    info.FileName = "cmd.exe"
+    info.Arguments = "/c npm run dev"
+    info.WorkingDirectory = PROJECT_DIR
+    info.CreateNoWindow = True
+    info.UseShellExecute = False
+    try:
+        System.Diagnostics.Process.Start(info)
+    except Exception:
+        return False
+
+    # 첫 기동은 컴파일 때문에 수십 초 걸린다
+    deadline = time.time() + wait_sec
+    while time.time() < deadline:
+        if server_alive():
+            return True
+        time.sleep(1.0)
+    return False
 
 # --- 범위 옵션 --------------------------------------------------------------
 # 광역: 지형·항공사진이 커버할 전체 범위. 반경이 커질수록 해상도를 낮춘다.
@@ -655,6 +703,19 @@ def estimate(wide, core):
 
 
 def run(address=None, wide_index=None, core_index=None, skip_confirm=False, textures=None):
+    # 0) 서버 — 꺼져 있으면 대신 띄운다
+    if not server_alive():
+        Rhino.RhinoApp.WriteLine("AAD 서버를 시작하는 중… (처음 한 번은 30초 정도 걸립니다)")
+        if not ensure_server():
+            rs.MessageBox(
+                u"AAD 서버에 연결할 수 없습니다.\n\n%s\n\n"
+                u"프로젝트 폴더에서 'npm run dev' 를 실행한 뒤 다시 시도하세요.\n"
+                u"폴더: %s" % (SERVER, PROJECT_DIR),
+                16,
+                u"AAD Site",
+            )
+            return
+
     # 1) 대상지
     if address is None:
         address = rs.GetString(u"대지 주소 또는 지번 (예: 압구정로29길 17)")
