@@ -442,7 +442,7 @@ def add_parcels(features, frame, target_pnu, core_radius, terrain=None):
     return made, neighbors, skipped
 
 
-def add_buildings3d(frame, radius, detail, max_tiles=40):
+def add_buildings3d(frame, radius, detail, max_tiles=40, textures=True):
     """
     브이월드 3D 건물(b3dm)을 그대로 가져온다 — 텍스처가 입혀진 실제 형상이다.
 
@@ -452,8 +452,8 @@ def add_buildings3d(frame, radius, detail, max_tiles=40):
     """
     west, south, east, north = frame.bbox(radius)
     url = (
-        "%s/api/vworld/buildings3d?bbox=%f,%f,%f,%f&lon=%f&lat=%f&detail=%d&maxTiles=%d&format=3dm"
-        % (SERVER, west, south, east, north, frame.lon0, frame.lat0, detail, max_tiles)
+        "%s/api/vworld/buildings3d?bbox=%f,%f,%f,%f&lon=%f&lat=%f&detail=%d&maxTiles=%d&format=3dm&textures=%d"
+        % (SERVER, west, south, east, north, frame.lon0, frame.lat0, detail, max_tiles, 1 if textures else 0)
     )
     stamp = System.Environment.TickCount
     zip_path = os.path.join(tempfile.gettempdir(), "aad_bldg_%d.zip" % stamp)
@@ -495,17 +495,32 @@ def add_buildings3d(frame, radius, detail, max_tiles=40):
     layer_index = sc.doc.Layers.FindByFullPath(LAYERS["buildings"], -1)
     # 재질을 먼저 문서에 등록하고 인덱스를 다시 매핑한다 (텍스처 경로 유지)
     # File3dmMaterialTable 은 인덱서를 노출하지 않아 순회로 다룬다
+    #
+    # 단색 모드에서는 객체마다 재질을 붙이지 않고 레이어 재질을 상속시킨다.
+    # 객체 재질로 붙이면 라이노가 저장할 때 객체 수만큼 재질을 복제해
+    # (38동 → 재질 38개) 파일을 열 때마다 그만큼 프리뷰를 만든다.
     material_map = {}
-    for i, material in enumerate(source.AllMaterials):
-        # 텍스처 파일은 3dm 옆에 풀려 있으므로 절대경로로 바꿔 준다
-        try:
-            bitmap = material.GetBitmapTexture()
-            if bitmap and bitmap.FileName and not os.path.isabs(bitmap.FileName):
-                bitmap.FileName = os.path.join(out_dir, os.path.basename(bitmap.FileName))
-                material.SetBitmapTexture(bitmap)
-        except Exception:
-            pass
-        material_map[i] = sc.doc.Materials.Add(material)
+    if not textures:
+        if layer_index >= 0 and sc.doc.Layers[layer_index].RenderMaterialIndex < 0:
+            mi = sc.doc.Materials.Add()
+            mat = sc.doc.Materials[mi]
+            mat.Name = "AAD 주변건물"
+            mat.DiffuseColor = System.Drawing.Color.FromArgb(205, 205, 200)
+            mat.CommitChanges()
+            layer = sc.doc.Layers[layer_index]
+            layer.RenderMaterialIndex = mi
+            layer.CommitChanges()
+    else:
+        for i, material in enumerate(source.AllMaterials):
+            # 텍스처 파일은 3dm 옆에 풀려 있으므로 절대경로로 바꿔 준다
+            try:
+                bitmap = material.GetBitmapTexture()
+                if bitmap and bitmap.FileName and not os.path.isabs(bitmap.FileName):
+                    bitmap.FileName = os.path.join(out_dir, os.path.basename(bitmap.FileName))
+                    material.SetBitmapTexture(bitmap)
+            except Exception:
+                pass
+            material_map[i] = sc.doc.Materials.Add(material)
 
     count = 0
     for obj in source.Objects:
@@ -514,6 +529,9 @@ def add_buildings3d(frame, radius, detail, max_tiles=40):
         if attributes.MaterialIndex in material_map:
             attributes.MaterialIndex = material_map[attributes.MaterialIndex]
             attributes.MaterialSource = Rhino.DocObjects.ObjectMaterialSource.MaterialFromObject
+        else:
+            attributes.MaterialIndex = -1
+            attributes.MaterialSource = Rhino.DocObjects.ObjectMaterialSource.MaterialFromLayer
         if layer_index >= 0:
             attributes.LayerIndex = layer_index
         if sc.doc.Objects.Add(geometry, attributes) != System.Guid.Empty:
@@ -636,7 +654,7 @@ def estimate(wide, core):
     )
 
 
-def run(address=None, wide_index=None, core_index=None, skip_confirm=False):
+def run(address=None, wide_index=None, core_index=None, skip_confirm=False, textures=None):
     # 1) 대상지
     if address is None:
         address = rs.GetString(u"대지 주소 또는 지번 (예: 압구정로29길 17)")
@@ -684,6 +702,17 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False):
         core = dict(CORE_OPTIONS[core_index])
     if core["radius"] >= wide["radius"]:
         core["radius"] = max(100, wide["radius"] // 3)
+
+    # 4) 주변 건물 재질 — 단색이면 재질이 1개라 파일이 훨씬 가볍고 빨리 열린다
+    if textures is None:
+        labels = [
+            u"단색 매스 (가볍고 빠름 · 권장)",
+            u"실사 텍스처 (사진 재질, 무거움)",
+        ]
+        chosen = rs.ListBox(labels, u"3단계 — 주변 건물 재질", u"AAD Site")
+        if not chosen:
+            return
+        textures = labels.index(chosen) == 1
 
     # 4) 규모 확인
     wide["tiles"] = tile_count(frame, wide["radius"], wide["zoom"])
@@ -741,9 +770,11 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False):
         notes.append(u"필지: 대상 1 + 인접 %d (폴리라인 %d)" % (neighbors, made))
 
         # 주변 건물 — 브이월드 3D 객체를 우선 쓰고, 없는 지역이면 대장 높이로 압출한다
-        count, bnote = add_buildings3d(frame, core["radius"], detail=5)
+        count, bnote = add_buildings3d(frame, core["radius"], 5, 40, textures)
         if count:
-            notes.append(u"주변건물(3D 실물): " + bnote)
+            notes.append(
+                u"주변건물(3D 실물, %s): %s" % (u"텍스처" if textures else u"단색", bnote)
+            )
         else:
             built, tried = add_buildings(
                 features, frame, target_pnu, core["radius"], core_terrain
@@ -788,6 +819,7 @@ if __name__ == "__main__":
             int(os.environ.get("AAD_TEST_WIDE", "2")),
             int(os.environ.get("AAD_TEST_CORE", "3")),
             True,
+            os.environ.get("AAD_TEST_TEXTURES", "0") == "1",
         )
     else:
         run()

@@ -31,14 +31,35 @@ function applyMatrix(m: number[], x: number, y: number, z: number): [number, num
   ];
 }
 
+/**
+ * rhino3dm 의 diffuseColor 는 타입 선언이 number[] 이지만 런타임은 {r,g,b,a} 만 받는다.
+ * 배열을 넣으면 예외 없이 무시되어 검정으로 남는다 (실측 확인).
+ */
+type RgbaColor = { r: number; g: number; b: number; a: number };
+function setDiffuse(material: { diffuseColor: number[] }, c: RgbaColor) {
+  (material as unknown as { diffuseColor: RgbaColor }).diffuseColor = c;
+}
+
 export interface Rhino3dmResult {
   zip: Uint8Array;
   stats: { meshes: number; vertices: number; faces: number; textures: number };
 }
 
+export interface To3dmOptions {
+  /**
+   * 텍스처를 버리고 단색 재질 하나로 통일한다.
+   * 컨텍스트 건물은 무채색으로 두고 자기 안을 강조하는 실무 관행에 맞고,
+   * 재질이 1개라 라이노가 파일을 훨씬 빨리 연다 (재질마다 프리뷰를 만든다).
+   */
+  plain?: boolean;
+  /** plain 일 때 쓸 색 (0~255) */
+  plainColor?: [number, number, number];
+}
+
 export async function documentTo3dmZip(
   doc: Document,
   name = "vworld_buildings",
+  options: To3dmOptions = {},
 ): Promise<Rhino3dmResult> {
   await doc.transform(dequantize(), flatten(), unpartition());
 
@@ -52,6 +73,17 @@ export async function documentTo3dmZip(
   let meshCount = 0;
   let vertexCount = 0;
   let faceCount = 0;
+
+  // 단색 모드 — 재질 하나만 만들어 모든 메시가 공유한다
+  let plainIndex = -1;
+  if (options.plain) {
+    const [r, g, b] = options.plainColor ?? [205, 205, 200];
+    const plainMat = new rh.Material();
+    plainMat.name = "context_building";
+    setDiffuse(plainMat, { r, g, b, a: 255 });
+    file.materials().add(plainMat);
+    plainIndex = 0;
+  }
 
   const scene = doc.getRoot().getDefaultScene() ?? doc.getRoot().listScenes()[0];
   if (!scene) throw new Error("씬이 없습니다");
@@ -95,8 +127,8 @@ export async function documentTo3dmZip(
 
         // 재질 — 텍스처는 zip 안에 PNG 로 두고 상대경로로 참조한다
         const material = prim.getMaterial();
-        let matIndex = -1;
-        if (material) {
+        let matIndex = plainIndex;
+        if (!options.plain && material) {
           if (!materialIndexes.has(material)) {
             const rhMat = new rh.Material();
             rhMat.name = `mat_${materialIndexes.size}`;
@@ -117,12 +149,12 @@ export async function documentTo3dmZip(
               if (fileName) rhMat.setBitmapTextureFilename(fileName);
             } else {
               const c = material.getBaseColorFactor();
-              rhMat.diffuseColor = [
-                Math.round(c[0] * 255),
-                Math.round(c[1] * 255),
-                Math.round(c[2] * 255),
-                255,
-              ];
+              setDiffuse(rhMat, {
+                r: Math.round(c[0] * 255),
+                g: Math.round(c[1] * 255),
+                b: Math.round(c[2] * 255),
+                a: 255,
+              });
             }
             file.materials().add(rhMat);
             materialIndexes.set(material, materialIndexes.size);
@@ -149,9 +181,9 @@ export async function documentTo3dmZip(
 
   // 버전을 지정하지 않으면 최신 포맷으로 저장되어 Rhino 7 이 열지 못한다.
   // 6 으로 쓰면 Rhino 6·7·8 모두 읽는다.
-  const options = new rh.File3dmWriteOptions();
-  options.version = 6;
-  const bytes = file.toByteArrayOptions(options);
+  const writeOptions = new rh.File3dmWriteOptions();
+  writeOptions.version = 6;
+  const bytes = file.toByteArrayOptions(writeOptions);
   zip.file(`${name}.3dm`, bytes);
   const out = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
   return {

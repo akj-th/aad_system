@@ -25,6 +25,8 @@ export async function GET(request: Request) {
   const maxTiles = Math.max(1, Math.min(MAX_TILES, parseInt(sp.get("maxTiles") ?? "40", 10) || 40));
   const originLon = Number(sp.get("lon") ?? (west + east) / 2);
   const originLat = Number(sp.get("lat") ?? (south + north) / 2);
+  // textures=0 이면 단색 매스로 받는다 (재질 1개 — 라이노가 훨씬 빨리 연다)
+  const plain = sp.get("textures") === "0";
   const requested = sp.get("format");
   // 3dm 이 기본 — Rhino 7 은 glTF 가져오기를 못 하고 OBJ 는 모달 대화상자를 띄운다
   const format: "3dm" | "obj" | "glb" =
@@ -64,7 +66,9 @@ export async function GET(request: Request) {
     }
 
     const { zip, stats } =
-      format === "3dm" ? await documentTo3dmZip(doc) : await documentToObjZip(doc);
+      format === "3dm"
+        ? await documentTo3dmZip(doc, "vworld_buildings", { plain })
+        : await documentToObjZip(doc);
     return new Response(new Uint8Array(zip), {
       headers: {
         "Content-Type": "application/zip",
