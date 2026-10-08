@@ -14,8 +14,13 @@
 const TILE = 65;
 const MAX_LEVEL = 15;
 const TILE_BYTES = TILE * TILE * 4;
-const MAX_TILES = 64; // 요청당 상한 — 넘으면 레벨을 낮춘다
-const MAX_GRID = 400; // 반환 격자 한 변 상한 (400×400 = 16만 점)
+// 요청당 타일 상한 — 넘으면 레벨을 낮춘다.
+// 64 로 두면 반경 1.5km 에서 level 13(6m 간격)까지밖에 못 가 지형이 뭉개진다.
+// level 14(3m) 로 1.5km 를 덮으려면 16×16=256 장이 필요하다.
+const MAX_TILES = 300;
+// 반환 격자 한 변 상한. 반경 1.5km 를 4.46m 간격(= 코어 500m 와 같은 밀도)으로
+// 덮으려면 673 이 필요하다.
+const MAX_GRID = 700;
 
 let cachedToken: { value: string; at: number } | null = null;
 const TOKEN_TTL_MS = 30 * 60 * 1000;

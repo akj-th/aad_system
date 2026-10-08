@@ -41,7 +41,9 @@ from System.Drawing.Imaging import Encoder, EncoderParameter, EncoderParameters,
 
 # 항공사진 텍스처 상한. 이보다 크면 라이노가 파일을 열 때 디코딩에 오래 걸려
 # "응답 없음" 상태가 된다 (실측: 13.4MB PNG 2장이 붙으면 열리지 않았다).
-MAX_TEXTURE_PX = 4096
+# 코어 500m 는 1km 폭을 2,304px(0.43m/px)로 덮는다. 1.5km(3km 폭)에서 같은 밀도를
+# 유지하려면 약 6,900px 가 필요하다. 7,168px 면 0.42m/px 로 그보다 조금 낫다.
+MAX_TEXTURE_PX = 7168
 JPEG_QUALITY = 85
 
 
@@ -147,29 +149,33 @@ WIDE_OPTIONS = [
 DEFAULT_WIDE = 2  # 5km
 
 # 코어: 대상지 주변 최고 해상도 구간. 지형·항공사진·필지선·건물이 여기 들어간다.
-# 지형 grid 는 DEM API 상한(400)까지. 괄호는 지형 정점 간격이다.
+# 코어는 반경이 커져도 밀도를 떨어뜨리지 않는다 — 전부 지형 4.46m · 항공 z19 다.
+# grid 는 (2*radius / 4.464) + 1 을 홀수로 맞춘 값이고, 홀수여야 대지 중심이 정점에 온다.
+# 그래서 넓힐수록 정점·타일이 제곱으로 늘고 시간도 그만큼 걸린다.
 CORE_OPTIONS = [
     {"label": u"100m — 대상지만", "radius": 100, "grid": 129, "zoom": 20},
     {"label": u"200m", "radius": 200, "grid": 161, "zoom": 20},
     {"label": u"300m", "radius": 300, "grid": 193, "zoom": 19},
-    {"label": u"500m (기본) — 4.4m 간격", "radius": 500, "grid": 225, "zoom": 19},
-    {"label": u"1km — 6.2m 간격", "radius": 1000, "grid": 321, "zoom": 18},
-    {"label": u"1.5km — 7.8m 간격", "radius": 1500, "grid": 385, "zoom": 17},
-    {"label": u"2km — 10.0m 간격", "radius": 2000, "grid": 400, "zoom": 17},
+    {"label": u"500m (기본)", "radius": 500, "grid": 225, "zoom": 19},
+    {"label": u"1km — 정점 20만", "radius": 1000, "grid": 449, "zoom": 19},
+    {"label": u"1.25km — 정점 31만", "radius": 1250, "grid": 561, "zoom": 19},
+    {"label": u"1.5km — 정점 45만", "radius": 1500, "grid": 673, "zoom": 19},
 ]
 DEFAULT_CORE = 3  # 500m
 
-MAX_TILES = 240
+# 항공사진 타일 상한. z19 로 반경 1.5km 를 덮으려면 39×39=1,521 장이 필요하다.
+# 줌을 낮추면 타일은 줄지만 해상도를 잃는다 — 여기서는 시간을 쓰고 해상도를 지킨다.
+MAX_TILES = 1600
 
 # 3D 건물 타일 상한. 상한에 걸리면 건물이 잘린 채로 들어오므로 넉넉히 둔다.
 # 실측(detail=0): 500m → 254장 · 11초 · 정점 165,526
 #                 1km  → 879장 · 29초 · 정점 859,216
-BUILDING_TILE_CAP = 1200
+BUILDING_TILE_CAP = 2400
 
 # 건물을 가져올 최대 반경. 지형·항공사진과 달리 건물은 면적에 비례해 폭증한다.
 # 실측: 1.5km 1,926장 / 2km 3,615장 · 443초 · 정점 372만 · zip 82MB — 라이노가 감당하지 못한다.
 # 코어를 그보다 넓게 잡아도 건물만 이 반경까지 가져온다.
-BUILDING_MAX_RADIUS = 1000
+BUILDING_MAX_RADIUS = 1500
 
 # 필지를 받을 반경. 대상지와 '인접' 필지만 그리므로 넓게 받을 이유가 없고,
 # 필지 API 는 bbox 변이 0.025도(약 2km)를 넘으면 거부한다 — 코어 2km 로 요청하면
@@ -419,15 +425,24 @@ def build_aerial(frame, radius, zoom):
             urls.append("%s/api/vworld/tile/Satellite/%d/%d/%d" % (SERVER, zoom, ty, tx))
     results = download_parallel(urls)
 
-    bitmap = Bitmap(cols * 256, rows * 256)
+    # 원본 크기로 합성한 뒤 줄이면 중간 비트맵이 너무 커진다
+    # (반경 1.5km 를 z19 로 받으면 9,984² = 약 400MB). 캔버스를 상한에 맞춰 잡고
+    # 타일을 그려 넣으면서 축소한다 — 결과 해상도는 같고 메모리만 줄어든다.
+    full = max(cols, rows) * 256
+    scale = 1.0 if full <= MAX_TEXTURE_PX else float(MAX_TEXTURE_PX) / full
+    cell = max(1, int(round(256 * scale)))
+    bitmap = Bitmap(cols * cell, rows * cell)
     graphics = Graphics.FromImage(bitmap)
+    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic
     ok = 0
     for i, data in enumerate(results):
         if not data:
             continue
         stream = System.IO.MemoryStream(data)
         try:
-            graphics.DrawImage(Bitmap(stream), Rectangle((i % cols) * 256, (i // cols) * 256, 256, 256))
+            tile = Bitmap(stream)
+            graphics.DrawImage(tile, Rectangle((i % cols) * cell, (i // cols) * cell, cell, cell))
+            tile.Dispose()
             ok += 1
         except Exception:
             pass
@@ -450,8 +465,14 @@ def build_aerial(frame, radius, zoom):
 
     return (
         {"path": path, "extent": ((px0, py0), (px1, py1))},
-        u"%d/%d장 · %dpx · %.1fMB"
-        % (ok, cols * rows, min(cols * 256, MAX_TEXTURE_PX), os.path.getsize(path) / 1048576.0),
+        u"%d/%d장 · %dpx · %.2fm/px · %.1fMB"
+        % (
+            ok,
+            cols * rows,
+            cols * cell,
+            (2.0 * radius) / max(1, cols * cell),
+            os.path.getsize(path) / 1048576.0,
+        ),
     )
 
 
@@ -565,7 +586,8 @@ def add_buildings3d(frame, radius, detail, max_tiles=None, textures=True):
             max_tiles = int(get_json(probe).get("tiles", 0)) or BUILDING_TILE_CAP
         except Exception:
             max_tiles = BUILDING_TILE_CAP
-        # 상한과 같으면 더 있는데 잘렸을 수 있다 — 조용히 넘어가면 안 된다
+        # probe 가 우리 상한에 못 미쳐도, 서버 쪽 상한에 먼저 걸렸을 수 있다.
+        # 그 경우에도 건물이 잘린 채로 들어오므로 둘 다 본다.
         capped = max_tiles >= BUILDING_TILE_CAP
     url = (
         "%s/api/vworld/buildings3d?bbox=%f,%f,%f,%f&lon=%f&lat=%f&detail=%d&maxTiles=%d&format=3dm&textures=%d"
@@ -577,8 +599,14 @@ def add_buildings3d(frame, radius, detail, max_tiles=None, textures=True):
 
     # 타일 수백 장이면 서버 변환에만 수 분이 걸린다 (실측 1km 29초 / 2km 443초)
     client = PatientWebClient(15 * 60 * 1000)
+    tiles_used = 0
     try:
         client.DownloadFile(url, zip_path)
+        # 서버에도 상한이 있어 우리가 요청한 만큼 다 오지 않을 수 있다 — 실제 장수를 읽는다
+        try:
+            tiles_used = int(client.ResponseHeaders["X-Tiles-Merged"])
+        except Exception:
+            tiles_used = 0
     except Exception as e:
         client.Dispose()
         return 0, u"내려받기 실패 (%s)" % e
@@ -656,11 +684,14 @@ def add_buildings3d(frame, radius, detail, max_tiles=None, textures=True):
     source.Dispose()
     note = u"%d개 객체 · 타일 %d장 · %.1fMB" % (
         count,
-        max_tiles,
+        tiles_used or max_tiles,
         os.path.getsize(zip_path) / 1048576.0,
     )
-    if capped:
-        note += u" ⚠ 타일 상한(%d)에 걸림 — 일부가 빠졌을 수 있음" % BUILDING_TILE_CAP
+    if capped or (tiles_used and tiles_used < max_tiles):
+        note += u" ⚠ 타일이 %d장에서 잘림 (필요 %d장) — 건물 일부가 빠졌다" % (
+            tiles_used or max_tiles,
+            max_tiles,
+        )
     return count, note
 
 
@@ -737,11 +768,21 @@ def add_buildings(features, frame, target_pnu, core_radius, terrain=None):
 # --- 정보 텍스트 ------------------------------------------------------------
 
 def add_info_text(lines, radius):
+    """
+    AddText 는 빈 문자열에 "text invalid" 예외를 던진다 (Rhino 8 에서 확인).
+    정보 한 줄 때문에 지형·건물까지 다 만들어 놓고 통째로 중단되면 안 된다.
+    """
     rs.CurrentLayer(LAYERS["info"])
     height = max(2.0, radius * 0.012)
     y = radius * 0.92
     for line in lines:
-        rs.AddText(line, (-radius * 0.95, y, 0), height)
+        text = (line or u"").strip()
+        if not text:
+            continue
+        try:
+            rs.AddText(text, (-radius * 0.95, y, 0), height)
+        except Exception as e:
+            Rhino.RhinoApp.WriteLine("AAD: 정보 텍스트 한 줄을 건너뜀 (%s)" % e)
         y -= height * 1.6
 
 
@@ -974,7 +1015,8 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False, text
             )
 
         # 대지 정보
-        info = [u"AAD 대지 컨텍스트", picked.get("title", address)]
+        # title 이 빈 문자열로 올 수 있다 — get 의 기본값은 그때 쓰이지 않는다
+        info = [u"AAD 대지 컨텍스트", picked.get("title") or address or u"(주소 미상)"]
         if target_pnu:
             try:
                 land = get_json("/api/vworld/landinfo?pnu=" + target_pnu).get("landInfo", {})
@@ -989,7 +1031,10 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False, text
         info.append(u"광역 %.1fkm / 코어 %dm" % (wide["radius"] / 1000.0, core["radius"]))
         info.extend(notes)
         info.append(u"참고용 — 최종 확인은 담당 건축사 책임")
-        add_info_text(info, core["radius"])
+        try:
+            add_info_text(info, core["radius"])
+        except Exception as e:
+            Rhino.RhinoApp.WriteLine("AAD: 정보 텍스트를 넣지 못했습니다 (%s)" % e)
     finally:
         rs.CurrentLayer(prev)
         rs.EnableRedraw(True)
