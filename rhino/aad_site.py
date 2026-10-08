@@ -147,19 +147,34 @@ WIDE_OPTIONS = [
 DEFAULT_WIDE = 2  # 5km
 
 # 코어: 대상지 주변 최고 해상도 구간. 지형·항공사진·필지선·건물이 여기 들어간다.
+# 지형 grid 는 DEM API 상한(400)까지. 괄호는 지형 정점 간격이다.
 CORE_OPTIONS = [
     {"label": u"100m — 대상지만", "radius": 100, "grid": 129, "zoom": 20},
     {"label": u"200m", "radius": 200, "grid": 161, "zoom": 20},
     {"label": u"300m", "radius": 300, "grid": 193, "zoom": 19},
-    {"label": u"500m (기본)", "radius": 500, "grid": 225, "zoom": 19},
+    {"label": u"500m (기본) — 4.4m 간격", "radius": 500, "grid": 225, "zoom": 19},
+    {"label": u"1km — 6.2m 간격", "radius": 1000, "grid": 321, "zoom": 18},
+    {"label": u"1.5km — 7.8m 간격", "radius": 1500, "grid": 385, "zoom": 17},
+    {"label": u"2km — 10.0m 간격", "radius": 2000, "grid": 400, "zoom": 17},
 ]
 DEFAULT_CORE = 3  # 500m
 
 MAX_TILES = 240
 
 # 3D 건물 타일 상한. 상한에 걸리면 건물이 잘린 채로 들어오므로 넉넉히 둔다.
-# 실측(반경 500m): detail=0 → 239장 · 11초 · 381동 · 정점 165,526
-BUILDING_TILE_CAP = 600
+# 실측(detail=0): 500m → 254장 · 11초 · 정점 165,526
+#                 1km  → 879장 · 29초 · 정점 859,216
+BUILDING_TILE_CAP = 1200
+
+# 건물을 가져올 최대 반경. 지형·항공사진과 달리 건물은 면적에 비례해 폭증한다.
+# 실측: 1.5km 1,926장 / 2km 3,615장 · 443초 · 정점 372만 · zip 82MB — 라이노가 감당하지 못한다.
+# 코어를 그보다 넓게 잡아도 건물만 이 반경까지 가져온다.
+BUILDING_MAX_RADIUS = 1000
+
+# 필지를 받을 반경. 대상지와 '인접' 필지만 그리므로 넓게 받을 이유가 없고,
+# 필지 API 는 bbox 변이 0.025도(약 2km)를 넘으면 거부한다 — 코어 2km 로 요청하면
+# 대상 필지조차 못 받는다. 실측: 500m → 544개, 1km → 1,000개(상한), 2km → 거부.
+PARCEL_RADIUS = 300
 
 # 건물 LOD 목표. 이 값보다 큰 geometricError 노드는 자식으로 내려간다.
 # 5 로 두면 중간 LOD 에서 멈춰 큰 건물만 들어온다 (실측 105동).
@@ -177,6 +192,26 @@ LAYERS = {
 
 
 # --- HTTP -------------------------------------------------------------------
+
+class PatientWebClient(WebClient):
+    """
+    WebClient 는 Timeout 속성이 없고 기본 100초에서 끊는다.
+    건물 타일 수백 장을 변환해 받는 요청은 그보다 오래 걸려서, 조용히 실패한 뒤
+    건축물대장 압출로 폴백해 버린다 (실측: 코어 2km 에서 1,931동 → 103동).
+    """
+
+    def __init__(self, timeout_ms):
+        self._timeout_ms = timeout_ms
+
+    def GetWebRequest(self, uri):
+        request = super(PatientWebClient, self).GetWebRequest(uri)
+        request.Timeout = self._timeout_ms
+        try:
+            request.ReadWriteTimeout = self._timeout_ms
+        except Exception:
+            pass
+        return request
+
 
 def get_json(path):
     client = WebClient()
@@ -540,7 +575,8 @@ def add_buildings3d(frame, radius, detail, max_tiles=None, textures=True):
     zip_path = os.path.join(tempfile.gettempdir(), "aad_bldg_%d.zip" % stamp)
     out_dir = os.path.join(tempfile.gettempdir(), "aad_bldg_%d" % stamp)
 
-    client = WebClient()
+    # 타일 수백 장이면 서버 변환에만 수 분이 걸린다 (실측 1km 29초 / 2km 443초)
+    client = PatientWebClient(15 * 60 * 1000)
     try:
         client.DownloadFile(url, zip_path)
     except Exception as e:
@@ -722,14 +758,27 @@ def set_earth_anchor(lon, lat):
 
 # --- 메인 -------------------------------------------------------------------
 
-def estimate(wide, core):
+def building_estimate(frame, radius):
+    """건물 타일 수를 미리 세어 둔다 — 반경이 커지면 비용이 면적에 비례해 뛴다"""
+    west, south, east, north = frame.bbox(radius)
+    probe = (
+        "/api/vworld/buildings3d?bbox=%f,%f,%f,%f&detail=%d&maxTiles=%d&probe=1"
+        % (west, south, east, north, BUILDING_DETAIL, BUILDING_TILE_CAP)
+    )
+    try:
+        return int(get_json(probe).get("tiles", 0))
+    except Exception:
+        return 0
+
+
+def estimate(wide, core, bldg_radius=None, bldg_tiles=0):
     """가져오기 전에 규모를 알려준다 — 라이노가 감당할지 스스로 판단할 수 있게"""
     wide_v = wide["grid"] ** 2
     core_v = core["grid"] ** 2
-    return (
+    text = (
         u"[광역 %.1fkm] 지형 %s정점 · 항공사진 타일 %d장\n"
         u"[코어 %dm] 지형 %s정점 · 항공사진 타일 %d장\n"
-        u"합계 정점 약 %s개\n\n계속할까요?"
+        u"지형 정점 합계 약 %s개\n"
         % (
             wide["radius"] / 1000.0,
             "{:,}".format(wide_v),
@@ -740,6 +789,17 @@ def estimate(wide, core):
             "{:,}".format(wide_v + core_v),
         )
     )
+    if bldg_tiles:
+        # 실측 기준: 타일 1장당 약 0.033초 · 정점 약 980개
+        text += u"[건물 %dm] 타일 %s장 · 정점 약 %s개 · 약 %d초\n" % (
+            bldg_radius,
+            "{:,}".format(bldg_tiles),
+            "{:,}".format(bldg_tiles * 980),
+            max(5, int(bldg_tiles * 0.033)),
+        )
+        if bldg_radius < core["radius"]:
+            text += u"  (건물은 %dm 상한까지 — 그 이상은 라이노가 버거워진다)\n" % BUILDING_MAX_RADIUS
+    return text + u"\n계속할까요?"
 
 
 def run(address=None, wide_index=None, core_index=None, skip_confirm=False, textures=None):
@@ -793,16 +853,21 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False, text
         wide = dict(WIDE_OPTIONS[wide_index])
 
     # 3) 코어 반경
+    # 코어가 광역에 가까우면 광역에 뚫는 구멍이 광역을 통째로 먹는다.
+    # 광역의 절반 이하만 고를 수 있게 한다 (radius 만 줄이면 grid·zoom 이 어긋난다).
+    usable = [c for c in CORE_OPTIONS if c["radius"] * 2 <= wide["radius"]]
+    if not usable:
+        usable = [CORE_OPTIONS[0]]
     if core_index is None:
-        labels = [c["label"] for c in CORE_OPTIONS]
+        labels = [c["label"] for c in usable]
         chosen = rs.ListBox(labels, u"2단계 — 최고 해상도로 볼 대상지 반경", u"AAD Site")
         if not chosen:
             return
-        core = dict(CORE_OPTIONS[labels.index(chosen)])
+        core = dict(usable[labels.index(chosen)])
     else:
-        core = dict(CORE_OPTIONS[core_index])
-    if core["radius"] >= wide["radius"]:
-        core["radius"] = max(100, wide["radius"] // 3)
+        core = dict(CORE_OPTIONS[min(core_index, len(CORE_OPTIONS) - 1)])
+        if core["radius"] * 2 > wide["radius"]:
+            core = dict(usable[-1])
 
     # 4) 주변 건물 재질 — 단색이면 재질이 1개라 파일이 훨씬 가볍고 빨리 열린다
     if textures is None:
@@ -826,7 +891,9 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False, text
         core["tiles"] = tile_count(frame, core["radius"], core["zoom"])
 
     if not skip_confirm:
-        if rs.MessageBox(estimate(wide, core), 1 | 32, u"가져올 규모") != 1:
+        bldg_radius = min(core["radius"], BUILDING_MAX_RADIUS)
+        bldg_tiles = building_estimate(frame, bldg_radius)
+        if rs.MessageBox(estimate(wide, core, bldg_radius, bldg_tiles), 1 | 32, u"가져올 규모") != 1:
             return
 
     rs.EnableRedraw(False)
@@ -867,8 +934,8 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False, text
         if core_terrain:
             build_terrain_mesh(core_terrain, LAYERS["core_terrain"], core_photo)
 
-        # 필지 — 코어 범위에서 받아 대상지+인접만 그린다
-        west, south, east, north = frame.bbox(core["radius"])
+        # 필지 — 대상지+인접만 그리므로 코어가 아무리 넓어도 이 반경으로 받는다
+        west, south, east, north = frame.bbox(min(core["radius"], PARCEL_RADIUS))
         fc = get_json("/api/vworld/parcels?bbox=%f,%f,%f,%f" % (west, south, east, north))
         features = fc.get("features", [])
         target_pnu = None
@@ -878,22 +945,33 @@ def run(address=None, wide_index=None, core_index=None, skip_confirm=False, text
                 target_pnu = one["parcel"].get("pnu")
         except Exception:
             pass
+        # 도로 필지를 걸러내는 기준(span)도 받아온 범위에 맞춰야 한다 —
+        # 코어 반경을 넘기면 2km 짜리 도로 필지가 통과해 도면을 뒤덮는다
         made, neighbors, skipped = add_parcels(
-            features, frame, target_pnu, core["radius"], core_terrain
+            features, frame, target_pnu, min(core["radius"], PARCEL_RADIUS), core_terrain
         )
         notes.append(u"필지: 대상 1 + 인접 %d (폴리라인 %d)" % (neighbors, made))
 
         # 주변 건물 — 브이월드 3D 객체를 우선 쓰고, 없는 지역이면 대장 높이로 압출한다
-        count, bnote = add_buildings3d(frame, core["radius"], BUILDING_DETAIL, None, textures)
+        bldg_radius = min(core["radius"], BUILDING_MAX_RADIUS)
+        count, bnote = add_buildings3d(frame, bldg_radius, BUILDING_DETAIL, None, textures)
+        if bldg_radius < core["radius"]:
+            bnote += u" · 반경 %dm 까지만 (건물은 %dm 상한)" % (bldg_radius, BUILDING_MAX_RADIUS)
         if count:
             notes.append(
                 u"주변건물(3D 실물, %s): %s" % (u"텍스처" if textures else u"단색", bnote)
             )
         else:
+            # 3D 실물을 못 받으면 대장 높이로 세운다. 형상이 박스로 바뀌는 큰 차이라
+            # 조용히 넘어가면 안 된다 — 명령행에도 띄운다.
             built, tried = add_buildings(
-                features, frame, target_pnu, core["radius"], core_terrain
+                features, frame, target_pnu, min(core["radius"], PARCEL_RADIUS), core_terrain
             )
-            notes.append(u"주변건물(대장 압출): %d동 — %s" % (built, bnote))
+            notes.append(u"⚠ 주변건물(대장 압출 대체): %d동 — 3D 실물 실패: %s" % (built, bnote))
+            Rhino.RhinoApp.WriteLine(
+                "AAD 경고: 3D 건물을 받지 못해 대장 높이 박스로 대체했습니다 (%d동). %s"
+                % (built, bnote)
+            )
 
         # 대지 정보
         info = [u"AAD 대지 컨텍스트", picked.get("title", address)]
